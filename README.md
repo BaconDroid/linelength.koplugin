@@ -11,9 +11,6 @@ Screenshots from a Kobo Libra Colour running KOReader v2026.07.2.
 
 ## Requirements
 
-- KOReader with the selection dialog's `ReaderHighlight:addToHighlightDialog`, which the plugin uses to
-  add its button. I read it in the v2026.07.1 source and use it on v2026.07.2; I have not checked older
-  versions.
 - Any device KOReader runs on. Colour needs a colour screen with KOReader's colour rendering on; on
   a black-and-white screen the card is in black and white. Only a Kobo Libra Colour has been tried.
 
