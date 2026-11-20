@@ -56,7 +56,6 @@ function Details:init()
     local small_face = Font:getFace("x_smallinfofont")
     local row_face = Font:getFace("smallinfofont")
     local row_bold_face = Font:getFace("smallinfofontbold")
-    local hint_face = Font:getFace("xx_smallinfofont")
 
     -- "#RRGGBB" to a colour, or nil (standard text colour) when the screen is not drawing in colour
     local function color(hex)
@@ -124,8 +123,6 @@ function Details:init()
         local band_color = color(band.color)
         table.insert(content, row((band.current and "● " or "○ ") .. band.label, band.range, face, face, band_color, band_color))
     end
-    table.insert(content, gap(8))
-    table.insert(content, centered(_("Select one line of text to measure it."), hint_face, Blitbuffer.COLOR_DARK_GRAY))
 
     self.frame = FrameContainer:new{
         background = Blitbuffer.COLOR_WHITE,
