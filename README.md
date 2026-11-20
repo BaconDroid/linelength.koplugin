@@ -116,6 +116,10 @@ not the device.
 PNGs at the size of a Libra Colour. It shows what the code draws into KOReader's buffer, not what a
 screen displays. The header of the file says how to run it.
 
+## License
+
+AGPL-3.0-or-later, the same as KOReader. See [LICENSE](LICENSE).
+
 ## Sources
 
 - Robert Bringhurst, *The Elements of Typographic Style*, as quoted in [2.1.2 Choose a comfortable
