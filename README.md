@@ -1,4 +1,6 @@
-# Word count: a line-length checker for KOReader
+# Line Length: a line-length checker for KOReader
+
+*Formerly called Word count.*
 
 Two ways to check how long the lines of a book are, and whether that is a good length for reading:
 
@@ -10,6 +12,8 @@ Two ways to check how long the lines of a book are, and whether that is a good l
 | <img src="docs/selection-dialog.png" width="400" alt="The selection dialog in KOReader with an extra last button reading Line: 56 chars, Excellent"> | <img src="docs/details-card.png" width="400" alt="The details card: 56 characters, Excellent, counts with and without spaces, words, and the four ranges"> |
 |:---:|:---:|
 | *The selection dialog after selecting a line. The extra button at the bottom shows how many characters the line has (56 here) and where that falls: Excellent.* | *Tap the button for the card: the count with and without spaces, the word count, and the four ranges with yours marked. It is drawn in colour on a colour screen.* |
+| <img src="docs/menu-item.png" width="400" alt="KOReader's Typeset menu with the last item, Line length: this page, highlighted"> | <img src="docs/page-card.png" width="400" alt="The page card: 59 characters in the longest line, Excellent, the three longest lines L11, L7 and L12 with 59, 58 and 56 characters, and the four ranges"> |
+| *The whole-page mode starts from the Typeset menu: the last item, Line length: this page.* | *The card for the whole page: the longest line has 59 characters (Excellent). Under it are the three longest lines, each with its place on the page (L11 is the eleventh line) and its length, then the four ranges. The X in the corner closes it.* |
 
 Screenshots from a Kobo Libra Colour running KOReader v2026.07.2.
 
@@ -43,7 +47,7 @@ characters, so check two or three.
 
 ### The whole page
 
-1. Open the Typeset menu (the style icon) and tap **Line length: this page**.
+1. Open the Typeset menu (the tab with a page of text on it) and tap **Line length: this page**.
 2. The card shows the **longest line** on the page, its verdict and the four ranges. Under the bold heading
    *Longest lines on this page:* are the three longest lines, each as `L5: start of the text … 54`: `L5` is
    that line's place on the page, counted from the top (the fifth line), then the start of its text, then
@@ -120,31 +124,40 @@ text colour. The button in the dialog is always plain, like the others.
 
 ## Install
 
-1. Download `wordcount.koplugin.zip` from the [latest release](../../releases/latest) and extract it.
-2. Copy the `wordcount.koplugin` folder into KOReader's plugins folder and restart KOReader. On a Kobo
+1. Download `linelength.koplugin.zip` from the [latest release](../../releases/latest) and extract it.
+2. Copy the `linelength.koplugin` folder into KOReader's plugins folder and restart KOReader. On a Kobo
    that is `.adds/koreader/plugins/`.
-3. Open a book and select some text: the button is the last one in the dialog.
+3. Open a book. Select some text and the button is the last one in the dialog, or open the Typeset menu
+   and tap **Line length: this page**.
+
+### Upgrading from Word count
+
+This plugin used to be called Word count, in a folder named `wordcount.koplugin` (versions up to 0.6.0).
+**Delete that folder before you copy `linelength.koplugin`.** If both stay, both load and the button and
+the menu item show up twice. The plugin keeps no settings, so nothing is lost. A gesture you set to
+*Line length: this page* keeps working: the action's internal id is still `wordcount_page` on purpose,
+because KOReader stores that id in the gesture settings.
 
 ## Tested on
 
-A Kobo Libra Colour (firmware 4.45) with KOReader v2026.07.2. The button, the card and the colours
-show on its screen.
+A Kobo Libra Colour (firmware 4.45) with KOReader v2026.07.2. The button, the card, the whole-page mode
+and the colours show on its screen.
 
 ## How it works
 
 - `main.lua` registers the button in slot `13_line_length`. KOReader sorts the buttons by that key, so
   the button comes after the built-in ones. It builds the label each time the dialog opens. It also adds
-  the Typeset menu item and the `wordcount_page` gesture action.
-- `wcount/pagelines.lua` reads the lines of the page on screen from KOReader's document engine
+  the Typeset menu item and the gesture action, whose id is still `wordcount_page` (see Upgrading).
+- `linelength/pagelines.lua` reads the lines of the page on screen from KOReader's document engine
   (`getTextFromPositions` for the lines, `getScreenPositionFromXPointer` to find which letters of a
   hyphenated word are on which line, `getTextFromXPointers` to read the text that is left) and picks the
   longest. It does not use KOReader itself: the engine is passed in, so it is tested on a desktop with a
   fake one.
-- `wcount/counter.lua` counts and `wcount/rating.lua` holds the ranges. Neither uses KOReader, so both
+- `linelength/counter.lua` counts and `linelength/rating.lua` holds the ranges. Neither uses KOReader, so both
   are tested on a desktop.
-- `wcount/report.lua` shapes the numbers for the card, and `wcount/details.lua` draws it from KOReader's
+- `linelength/report.lua` shapes the numbers for the card, and `linelength/details.lua` draws it from KOReader's
   own widgets. If building the card fails, the same information is shown as plain text.
-- `wcount/colortext.lua` is a `TextWidget` that keeps the colour. KOReader's `TextWidget` blits glyphs
+- `linelength/colortext.lua` is a `TextWidget` that keeps the colour. KOReader's `TextWidget` blits glyphs
   through `getColor8A()`, which keeps only the brightness of a colour, so any text colour comes out grey.
   This widget draws the same glyphs with `colorblitFromRGB32` when the colour is not a grey, and
   defers to `TextWidget` otherwise.

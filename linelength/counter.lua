@@ -1,4 +1,4 @@
--- Counting for the Word count plugin. Pure Lua: no KOReader requires, so it is tested on a
+-- Counting for the Line Length plugin. Pure Lua: no KOReader requires, so it is tested on a
 -- desktop Lua. LuaJIT/Lua 5.1 safe (no goto, no bit operators).
 --
 -- A "character" is one Unicode code point, so "é" is 1, not 2 bytes. Invisible formatting

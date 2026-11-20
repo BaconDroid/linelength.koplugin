@@ -1,4 +1,4 @@
--- Test of wcount/pagelines.lua against KOReader's REAL text engine (crengine), headless, on the books made by
+-- Test of linelength/pagelines.lua against KOReader's REAL text engine (crengine), headless, on the books made by
 -- tests/fixtures/make_epub.py. For every page the corrected line lengths must add up exactly to the text
 -- of that page as crengine itself defines it (from this page's start to the next page's start): no
 -- character counted twice, none lost. It also shows how far the longest line is overstated without the
@@ -20,8 +20,8 @@ local Screen = Device.screen
 local util = require("util")
 
 package.path = os.getenv("PLUGIN_DIR") .. "/?.lua;" .. package.path
-local PageLines = require("wcount/pagelines")
-local Counter = require("wcount/counter")
+local PageLines = require("linelength/pagelines")
+local Counter = require("linelength/counter")
 
 local W, H = Screen:getWidth(), Screen:getHeight()
 local failures, pages_total, pages_ok, overstated_pages, max_overstatement, lines_total = 0, 0, 0, 0, 0, 0

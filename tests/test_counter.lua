@@ -1,6 +1,6 @@
--- Unit tests for wcount/counter.lua. Run through tests/run.py (lupa), not on the device.
+-- Unit tests for linelength/counter.lua. Run through tests/run.py (lupa), not on the device.
 package.path = "./?.lua;" .. package.path
-local Counter = require("wcount/counter")
+local Counter = require("linelength/counter")
 
 local failures = 0
 local function check(name, text, words, chars, no_spaces)

@@ -1,8 +1,8 @@
--- The details card of the Word count plugin: a small dialog with the characters of the selection or
+-- The details card of the Line Length plugin: a small dialog with the characters of the selection or
 -- the longest lines of a page, a verdict for the line length, and the four ranges with the current one
 -- marked. Built from KOReader's own widgets and modelled on InfoMessage: tap anywhere, or the X in the
 -- top right corner, to close it.
--- It takes a report from wcount/report and never touches the selection itself.
+-- It takes a report from linelength/report and never touches the selection itself.
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
@@ -18,7 +18,7 @@ local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
-local TextWidget = require("wcount/colortext") -- TextWidget that can keep colour (see that file)
+local TextWidget = require("linelength/colortext") -- TextWidget that can keep colour (see that file)
 local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -27,11 +27,11 @@ local _ = require("gettext")
 local Input = Device.input
 local Screen = Device.screen
 
-local Rating = require("wcount/rating")
+local Rating = require("linelength/rating")
 
 local Details = InputContainer:extend{
     modal = true,
-    report = nil,       -- from wcount/report
+    report = nil,       -- from linelength/report
     use_color = false,  -- true when the screen is drawing in colour
 }
 

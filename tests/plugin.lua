@@ -25,7 +25,7 @@ local util = require("util")
 
 local PLUGIN = os.getenv("PLUGIN_DIR")
 package.path = PLUGIN .. "/?.lua;" .. package.path
-local PageLines = require("wcount/pagelines")
+local PageLines = require("linelength/pagelines")
 
 local failures = 0
 local function check(name, ok, detail)
@@ -53,8 +53,8 @@ local ui = {
 }
 
 -- the real plugin file. KOReader's own :new calls init(), so it is not called again here.
-local WordCount = dofile(PLUGIN .. "/main.lua")
-local plugin = WordCount:new{ document = doc, ui = ui }
+local LineLength = dofile(PLUGIN .. "/main.lua")
+local plugin = LineLength:new{ document = doc, ui = ui }
 check("the plugin registered itself with the menu", #registered_menu == 1 and registered_menu[1] == plugin)
 check("the selection button is still registered", type(highlight_slots["13_line_length"]) == "function")
 local Dispatcher = require("dispatcher")
@@ -62,7 +62,7 @@ local Dispatcher = require("dispatcher")
 -- the menu item, built the way KOReader builds it
 local items = {}
 plugin:addToMainMenu(items)
-check("a Typeset menu item exists", items.wordcount_page and items.wordcount_page.sorting_hint == "typeset")
+check("a Typeset menu item exists", items.linelength_page and items.linelength_page.sorting_hint == "typeset")
 
 -- what the page really holds, worked out independently of main.lua
 local lines = PageLines.collect(doc, Screen:getWidth(), Screen:getHeight(), util.cleanupSelectedText)
@@ -87,7 +87,7 @@ local page_widget = {
     -- the reader window: events sent by KOReader reach the plugin the way ReaderUI forwards them
     handleEvent = function(_self, event)
         events_seen[#events_seen + 1] = event.handler
-        if event.handler == "onWordcountPage" then return plugin:onWordcountPage() end
+        if event.handler == "onLinelengthPage" then return plugin:onLinelengthPage() end
         return false
     end,
 }
@@ -95,7 +95,7 @@ real_show(UIManager, page_widget)
 UIManager:forceRePaint()
 -- the bare page, for counting its lines by eye against the numbers on the card
 Screen:shot((os.getenv("SHOT_DIR") or ".") .. "/page_only.png")
-items.wordcount_page.callback()
+items.linelength_page.callback()
 UIManager:forceRePaint()
 
 check("the menu item showed a card", shown ~= nil)
@@ -191,7 +191,7 @@ ReaderUI.instance = ui -- ui.rolling is set and ui.paging is not: a book that re
 shown, events_seen = nil, {}
 Dispatcher:execute({ wordcount_page = true })
 UIManager:forceRePaint()
-check("the dispatcher sent the plugin's event", events_seen[1] == "onWordcountPage", tostring(events_seen[1]))
+check("the dispatcher sent the plugin's event", events_seen[1] == "onLinelengthPage", tostring(events_seen[1]))
 check("and the card was shown", shown ~= nil)
 UIManager:close(shown)
 UIManager:forceRePaint()
@@ -205,7 +205,7 @@ end
 ReaderUI.instance = ui
 -- the handler itself
 shown = nil
-check("the action handler says it handled the event", plugin:onWordcountPage() == true)
+check("the action handler says it handled the event", plugin:onLinelengthPage() == true)
 check("and shows the card", shown ~= nil)
 
 if failures > 0 then print(failures .. " FAILURE(S)"); os.exit(1) end

@@ -1,6 +1,6 @@
--- Unit tests for wcount/report.lua. Run through tests/run.py (lupa), not on the device.
+-- Unit tests for linelength/report.lua. Run through tests/run.py (lupa), not on the device.
 package.path = "./?.lua;" .. package.path
-local Report = require("wcount/report")
+local Report = require("linelength/report")
 
 local failures = 0
 local function expect(name, got, want)

@@ -12,7 +12,7 @@
 --   getTextFromPositions(pos0, pos1, true) -> { text, pos0, pos1, sboxes = { {x,y,w,h}, ... } } or nil
 --   getScreenPositionFromXPointer(xpointer) -> y, x   (screen y first; off the page it is outside it)
 --   getTextFromXPointers(xpointer0, xpointer1) -> string
-local Counter = require("wcount/counter")
+local Counter = require("linelength/counter")
 
 local PageLines = {}
 

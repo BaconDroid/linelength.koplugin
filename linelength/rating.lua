@@ -1,4 +1,4 @@
--- Line-length rating for the Word count plugin. Pure Lua: no KOReader requires.
+-- Line-length rating for the Line Length plugin. Pure Lua: no KOReader requires.
 --
 -- The number of characters of a selected line (spaces and symbols included) is mapped to a band.
 -- The edges come from published guidance on "measure" (characters per line); see the README for

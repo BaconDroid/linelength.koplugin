@@ -14,13 +14,13 @@ local util = require("util")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local Counter = require("wcount/counter")
-local PageLines = require("wcount/pagelines")
-local Rating = require("wcount/rating")
-local Report = require("wcount/report")
+local Counter = require("linelength/counter")
+local PageLines = require("linelength/pagelines")
+local Rating = require("linelength/rating")
+local Report = require("linelength/report")
 
-local WordCount = WidgetContainer:extend{
-    name = "wordcount",
+local LineLength = WidgetContainer:extend{
+    name = "linelength",
     is_doc_only = true,
 }
 
@@ -83,11 +83,11 @@ local function showReport(report)
     -- The card is loaded on demand and guarded: whatever goes wrong with it, the button stays and
     -- the information is still shown.
     local ok, err = pcall(function()
-        local Details = require("wcount/details")
+        local Details = require("linelength/details")
         UIManager:show(Details:new{ report = report, use_color = colorEnabled() })
     end)
     if not ok then
-        logger.warn("wordcount: could not show the details card, using plain text:", err)
+        logger.warn("linelength: could not show the details card, using plain text:", err)
         UIManager:show(InfoMessage:new{ text = plainText(report) })
     end
 end
@@ -116,10 +116,10 @@ local function pageReport(ui)
     return Report.buildPage(top, LABELS)
 end
 
-function WordCount:showPage()
+function LineLength:showPage()
     local ok, report, reason = pcall(pageReport, self.ui)
     if not ok then
-        logger.warn("wordcount: could not read the lines of this page:", report)
+        logger.warn("linelength: could not read the lines of this page:", report)
         UIManager:show(InfoMessage:new{ text = _("Could not read the lines of this page.") })
         return
     end
@@ -134,28 +134,30 @@ function WordCount:showPage()
 end
 
 -- The page measurement as an action, so it can be put on a gesture, a quick action or a profile.
-function WordCount:onDispatcherRegisterActions()
+function LineLength:onDispatcherRegisterActions()
+    -- The id "wordcount_page" is the plugin's old name. KOReader stores it in gesture and profile settings, so it
+    -- stays: renaming it would silently unassign every gesture set up with 0.5.x or 0.6.x.
     -- rolling = only offered while a book that reflows is open (KOReader's own font actions do the same);
     -- in a PDF or in the file manager the action is not listed and does not run.
     Dispatcher:registerAction("wordcount_page", {
-        category = "none", event = "WordcountPage", title = _("Line length: this page"), rolling = true,
+        category = "none", event = "LinelengthPage", title = _("Line length: this page"), rolling = true,
     })
 end
 
-function WordCount:onWordcountPage()
+function LineLength:onLinelengthPage()
     self:showPage()
     return true
 end
 
-function WordCount:addToMainMenu(menu_items)
-    menu_items.wordcount_page = {
+function LineLength:addToMainMenu(menu_items)
+    menu_items.linelength_page = {
         text = _("Line length: this page"),
         sorting_hint = "typeset",
         callback = function() self:showPage() end,
     }
 end
 
-function WordCount:init()
+function LineLength:init()
     -- Only in a book.
     if not self.document then
         return
@@ -179,4 +181,4 @@ function WordCount:init()
     end)
 end
 
-return WordCount
+return LineLength

@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like "v0.1.0" to build wordcount.koplugin.zip and attach it to a GitHub Release.
+# Push a tag like "v0.1.0" to build linelength.koplugin.zip and attach it to a GitHub Release.
 on:
   push:
     tags:
@@ -41,16 +41,16 @@ jobs:
       - name: Build plugin zip
         run: |
           stage="$RUNNER_TEMP/stage"
-          mkdir -p "$stage/wordcount.koplugin"
-          cp -r _meta.lua main.lua LICENSE wcount "$stage/wordcount.koplugin/"
+          mkdir -p "$stage/linelength.koplugin"
+          cp -r _meta.lua main.lua LICENSE linelength "$stage/linelength.koplugin/"
           cd "$stage"
-          zip -r "$GITHUB_WORKSPACE/wordcount.koplugin.zip" wordcount.koplugin \
+          zip -r "$GITHUB_WORKSPACE/linelength.koplugin.zip" linelength.koplugin \
             -x "*.git*" -x "*/.DS_Store"
-          unzip -l "$GITHUB_WORKSPACE/wordcount.koplugin.zip"
+          unzip -l "$GITHUB_WORKSPACE/linelength.koplugin.zip"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ steps.kind.outputs.prerelease }}
-          files: wordcount.koplugin.zip
+          files: linelength.koplugin.zip
           generate_release_notes: true

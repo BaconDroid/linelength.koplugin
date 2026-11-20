@@ -81,7 +81,7 @@ function DetailsStub:new(o)
     details_opts[#details_opts + 1] = o
     return { is_details = true, opts = o }
 end
-package.preload["wcount/details"] = function() return DetailsStub end
+package.preload["linelength/details"] = function() return DetailsStub end
 
 local failures = 0
 local function expect(name, got, want)
@@ -91,9 +91,9 @@ local function expect(name, got, want)
     end
 end
 
-local WordCount = require("main")
-expect("plugin name", WordCount.name, "wordcount")
-expect("only loads inside a book", WordCount.is_doc_only, true)
+local LineLength = require("main")
+expect("plugin name", LineLength.name, "linelength")
+expect("only loads inside a book", LineLength.is_doc_only, true)
 
 local function newHighlight()
     local h = { _highlight_buttons = {} }
@@ -102,7 +102,7 @@ local function newHighlight()
 end
 
 local function makePlugin(opts)
-    local p = WordCount:new({ document = opts.document, ui = opts.ui })
+    local p = LineLength:new({ document = opts.document, ui = opts.ui })
     p:init()
     return p
 end
@@ -135,7 +135,7 @@ expect("label follows the selection", button_fn({ selected_text = { text = "one"
 expect("nil selected_text", button_fn({}).text, "Line: 0 chars · Short")
 expect("nil text", button_fn({ selected_text = {} }).text, "Line: 0 chars · Short")
 expect("nil highlight", button_fn(nil).text, "Line: 0 chars · Short")
-expect("the card is not loaded until needed", package.loaded["wcount/details"], nil)
+expect("the card is not loaded until needed", package.loaded["linelength/details"], nil)
 
 -- 4. the label at every band edge
 local bands = {
@@ -191,8 +191,8 @@ local PLAIN = "Characters, with spaces: 18\nCharacters, without spaces: 16\nWord
     .. "Characters per line (select one line):\n50–66  Excellent\n67–75  Comfortable\n76–80  Still readable\n81+  Too long"
 
 -- 7a. the card module fails to load
-package.loaded["wcount/details"] = nil
-package.preload["wcount/details"] = function() error("boom") end
+package.loaded["linelength/details"] = nil
+package.preload["linelength/details"] = function() error("boom") end
 tap(sample.selected_text.text)
 expect("load failure: one widget", #shown, 1)
 expect("load failure: plain text popup", shown[1].is_infomessage, true)
@@ -200,8 +200,8 @@ expect("load failure: same information", shown[1].text, PLAIN)
 expect("load failure: one warning", #warns, 1)
 
 -- 7b. the card raises while it is being built
-package.loaded["wcount/details"] = nil
-package.preload["wcount/details"] = function()
+package.loaded["linelength/details"] = nil
+package.preload["linelength/details"] = function()
     return { new = function() error("kaboom") end }
 end
 tap(sample.selected_text.text)
@@ -210,8 +210,8 @@ expect("build failure: same information", shown[1] and shown[1].text, PLAIN)
 expect("build failure: one warning", #warns, 1)
 
 -- back to the normal stub: the card works again afterwards
-package.loaded["wcount/details"] = nil
-package.preload["wcount/details"] = function() return DetailsStub end
+package.loaded["linelength/details"] = nil
+package.preload["linelength/details"] = function() return DetailsStub end
 tap(sample.selected_text.text)
 expect("recovers after a failure", shown[1] and shown[1].is_details, true)
 
@@ -297,9 +297,10 @@ local function reset() shown, warns, details_opts, screen_state.raises, color_st
 
 -- 10a. registration: the action, the menu, and the selection button together
 local plugin, menu = pagePlugin(fakeDoc({ L1, L2, L3 }))
+-- the action id is still "wordcount_page", the plugin's old name, on purpose: gestures and profiles store it
 local action = actions["wordcount_page"]
 expect("action registered", type(action), "table")
-expect("action event", action and action.event, "WordcountPage")
+expect("action event", action and action.event, "LinelengthPage")
 expect("action title", action and action.title, "Line length: this page")
 expect("action is only for books that reflow", action and action.rolling, true)
 expect("and is not marked for every book type", action and action.reader, nil)
@@ -308,8 +309,8 @@ expect("registered with the menu once", #menu.registered, 1)
 expect("registered as this plugin", menu.registered[1], plugin)
 local items = {}
 plugin:addToMainMenu(items)
-expect("menu item text", items.wordcount_page and items.wordcount_page.text, "Line length: this page")
-expect("menu item goes in the Typeset menu", items.wordcount_page and items.wordcount_page.sorting_hint, "typeset")
+expect("menu item text", items.linelength_page and items.linelength_page.text, "Line length: this page")
+expect("menu item goes in the Typeset menu", items.linelength_page and items.linelength_page.sorting_hint, "typeset")
 local item_count = 0
 for _k in pairs(items) do item_count = item_count + 1 end
 expect("one menu item", item_count, 1)
@@ -332,7 +333,7 @@ expect("a menu without the highlight module", #only_menu.registered, 1)
 reset()
 items = {}
 plugin:addToMainMenu(items)
-items.wordcount_page.callback()
+items.linelength_page.callback()
 expect("menu item shows one widget", #shown, 1)
 expect("it is the card", shown[1] and shown[1].is_details, true)
 local pr = shown[1] and shown[1].opts.report
@@ -355,38 +356,38 @@ expect("card asked for colour on a colour screen", shown[1].opts.use_color, true
 
 -- 10d. the gesture action does the same, and says it handled the event
 reset()
-expect("the action handler reports it handled the event", plugin:onWordcountPage(), true)
+expect("the action handler reports it handled the event", plugin:onLinelengthPage(), true)
 expect("the action shows the card too", shown[1] and shown[1].is_details, true)
 
 -- 10e. fewer than three lines: only those are listed
 reset()
 local small = pagePlugin(fakeDoc({ L2, L3 }))
-small:onWordcountPage()
+small:onLinelengthPage()
 expect("two lines on the page: two listed", shown[1] and #shown[1].opts.report.lines, 2)
 reset()
 local single = pagePlugin(fakeDoc({ L3 }))
-single:onWordcountPage()
+single:onLinelengthPage()
 expect("one line: 45 is Short, no colour", shown[1] and shown[1].opts.report.tier.id, "short")
 
 -- 10f. nothing to measure
 reset()
 local unsupported = pagePlugin(fakeDoc({ L1 }), { rolling = false })
 unsupported.ui.rolling = nil
-unsupported:onWordcountPage()
+unsupported:onLinelengthPage()
 expect("a book that does not reflow: a message", shown[1] and shown[1].is_infomessage, true)
 expect("and it says why", shown[1] and shown[1].text, "This only works in books that reflow, like EPUB.")
 reset()
 local no_methods = pagePlugin({})
-no_methods:onWordcountPage()
+no_methods:onLinelengthPage()
 expect("an engine without the line functions: same message", shown[1] and shown[1].text, "This only works in books that reflow, like EPUB.")
 reset()
 local blank = pagePlugin(fakeDoc({}))
-blank:onWordcountPage()
+blank:onLinelengthPage()
 expect("a page without text: a message", shown[1] and shown[1].is_infomessage, true)
 expect("and it says so", shown[1] and shown[1].text, "There is no text on this page.")
 reset()
 local broken_engine = pagePlugin(fakeDoc({ L1 }, { raises = true }))
-broken_engine:onWordcountPage()
+broken_engine:onLinelengthPage()
 expect("an engine that raises reads as an empty page", shown[1] and shown[1].text, "There is no text on this page.")
 expect("without a crash or a warning", #warns, 0)
 
@@ -395,19 +396,19 @@ for _i, missing in ipairs({ "getTextFromXPointers", "getScreenPositionFromXPoint
     reset()
     local doc = fakeDoc({ L1 })
     doc[missing] = nil
-    pagePlugin(doc):onWordcountPage()
+    pagePlugin(doc):onLinelengthPage()
     expect("an engine without " .. missing .. ": not supported", shown[1] and shown[1].text, "This only works in books that reflow, like EPUB.")
 end
 
 -- the page is read the way the highlight button reads a selection: spaces collapsed first
 reset()
-pagePlugin(fakeDoc({ ("x"):rep(10) .. "   " .. ("y"):rep(10) })):onWordcountPage()
+pagePlugin(fakeDoc({ ("x"):rep(10) .. "   " .. ("y"):rep(10) })):onLinelengthPage()
 expect("three spaces count as one (10 + 1 + 10)", shown[1] and shown[1].opts.report.chars, 21)
 
 -- 10g. anything unexpected is caught and reported, never raised into KOReader
 reset()
 screen_state.raises = true
-plugin:onWordcountPage()
+plugin:onLinelengthPage()
 expect("unexpected error: a message is shown", shown[1] and shown[1].is_infomessage, true)
 expect("unexpected error: it says what failed", shown[1] and shown[1].text, "Could not read the lines of this page.")
 expect("unexpected error: one warning", #warns, 1)
@@ -420,14 +421,14 @@ local PLAIN_PAGE = "Longest lines on this page (characters):\n"
     .. "L3: " .. ("c"):rep(32) .. "…  45\n\n"
     .. "50–66  Excellent\n67–75  Comfortable\n76–80  Still readable\n81+  Too long"
 reset()
-package.loaded["wcount/details"] = nil
-package.preload["wcount/details"] = function() error("boom") end
-plugin:onWordcountPage()
+package.loaded["linelength/details"] = nil
+package.preload["linelength/details"] = function() error("boom") end
+plugin:onLinelengthPage()
 expect("card load failure: plain text popup", shown[1] and shown[1].is_infomessage, true)
 expect("card load failure: the lines and the ranges", shown[1] and shown[1].text, PLAIN_PAGE)
 expect("card load failure: one warning", #warns, 1)
-package.loaded["wcount/details"] = nil
-package.preload["wcount/details"] = function() return DetailsStub end
+package.loaded["linelength/details"] = nil
+package.preload["linelength/details"] = function() return DetailsStub end
 
 -- 10i. the selection button is unaffected by all this
 reset()

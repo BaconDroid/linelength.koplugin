@@ -28,8 +28,8 @@ local UIManager = require("ui/uimanager")
 local Screen = Device.screen
 
 package.path = (os.getenv("PLUGIN_DIR") or ".") .. "/?.lua;" .. package.path
-local Report = require("wcount/report")
-local Details = require("wcount/details")
+local Report = require("linelength/report")
+local Details = require("linelength/details")
 
 local OUT = os.getenv("SHOT_DIR") or "."
 print(string.format("screen %dx%d dpi %d colour screen=%s colour enabled=%s", Screen:getWidth(), Screen:getHeight(),
