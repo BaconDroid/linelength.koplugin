@@ -23,13 +23,13 @@ expect("chars", r.chars, 60)
 expect("chars without spaces", r.chars_no_spaces, 50)
 expect("words", r.words, 9)
 
--- the four ranges, lowest first, with the spec'd labels and colours
+-- the four bands, best first, with labels, ranges and colours; Comfortable has two ranges
 expect("band count", #r.bands, 4)
 local want = {
-    { "excellent", "Excellent", "45–54", "#0072B2" },
-    { "comfortable", "Comfortable", "55–64", "#009E73" },
-    { "still_readable", "Still readable", "65–74", "#E69F00" },
-    { "too_long", "Too long", "75+", "#D55E00" },
+    { "excellent", "Excellent", "50–66", "#0072B2" },
+    { "comfortable", "Comfortable", "45–49, 67–75", "#009E73" },
+    { "still_readable", "Still readable", "76–80", "#E69F00" },
+    { "too_long", "Too long", "81+", "#D55E00" },
 }
 for i, w in ipairs(want) do
     local b = r.bands[i]
@@ -47,25 +47,32 @@ local function current(chars)
     end
     return table.concat(ids, ",")
 end
+expect("0 has no current band", current(0), "")
 expect("44 has no current band", current(44), "")
-expect("45", current(45), "excellent")
-expect("54", current(54), "excellent")
-expect("55", current(55), "comfortable")
-expect("64", current(64), "comfortable")
-expect("65", current(65), "still_readable")
-expect("74", current(74), "still_readable")
-expect("75", current(75), "too_long")
+expect("45", current(45), "comfortable")
+expect("49", current(49), "comfortable")
+expect("50", current(50), "excellent")
+expect("66", current(66), "excellent")
+expect("67", current(67), "comfortable")
+expect("75", current(75), "comfortable")
+expect("76", current(76), "still_readable")
+expect("80", current(80), "still_readable")
+expect("81", current(81), "too_long")
 expect("300", current(300), "too_long")
-expect("0", current(0), "")
 
 -- the verdict
-expect("tier id", r.tier.id, "comfortable")
-expect("tier label", r.tier.label, "Comfortable")
-expect("tier colour", r.tier.color, "#009E73")
+expect("tier id", r.tier.id, "excellent")
+expect("tier label", r.tier.label, "Excellent")
+expect("tier colour", r.tier.color, "#0072B2")
+expect("60: Excellent is current", r.bands[1].current, true)
+expect("60: Comfortable is not", r.bands[2].current, false)
 local s = build(30)
 expect("short id", s.tier.id, "short")
 expect("short label", s.tier.label, "Short")
 expect("short has no colour", s.tier.color, nil)
+local c = build(70)
+expect("70 is Comfortable", c.tier.id, "comfortable")
+expect("70: Comfortable (its second range) is current", c.bands[2].current, true)
 
 if failures > 0 then
     error(failures .. " report test(s) failed")

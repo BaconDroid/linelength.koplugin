@@ -70,12 +70,12 @@ local function card(chars, use_color, name)
     snap(name, Details:new{ report = Report.build(counts, LABELS), use_color = use_color })
 end
 
-card(52, true, "card_excellent_colour")
-card(60, true, "card_comfortable_colour")
-card(70, true, "card_still_readable_colour")
+card(58, true, "card_excellent_colour")
+card(70, true, "card_comfortable_colour")
+card(78, true, "card_still_readable_colour")
 card(88, true, "card_too_long_colour")
 card(30, true, "card_short_colour")
-card(60, false, "card_comfortable_nocolour")
+card(58, false, "card_excellent_nocolour")
 
 -- the highlight dialog with our single plain button, as a user would see it
 local function btn(text) return { text = text, callback = function() end } end
@@ -86,7 +86,7 @@ snap("dialog_with_button", ButtonDialog:new{
         { btn("Wikipedia"), btn("Dictionary") },
         { btn("Translate"), btn("View HTML") },
         { btn("Generate QR code"), btn("Search") },
-        { btn("Line: 58 chars · Comfortable") },
+        { btn("Line: 58 chars · Excellent") },
     },
 })
 print("done")

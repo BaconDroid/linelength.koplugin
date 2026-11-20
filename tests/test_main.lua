@@ -127,9 +127,9 @@ expect("the card is not loaded until needed", package.loaded["wcount/details"], 
 
 -- 4. the label at every band edge
 local bands = {
-    { 44, "Short" }, { 45, "Excellent" }, { 54, "Excellent" }, { 55, "Comfortable" },
-    { 64, "Comfortable" }, { 65, "Still readable" }, { 74, "Still readable" },
-    { 75, "Too long" }, { 200, "Too long" },
+    { 44, "Short" }, { 45, "Comfortable" }, { 49, "Comfortable" }, { 50, "Excellent" },
+    { 66, "Excellent" }, { 67, "Comfortable" }, { 75, "Comfortable" }, { 76, "Still readable" },
+    { 80, "Still readable" }, { 81, "Too long" }, { 200, "Too long" },
 }
 for _i, c in ipairs(bands) do
     local b = button_fn({ selected_text = { text = string.rep("a", c[1]) } })
@@ -155,15 +155,16 @@ expect("report verdict label", report.tier.label, "Short")
 expect("short has no colour", report.tier.color, nil)
 expect("four ranges", #report.bands, 4)
 expect("range label is translated text", report.bands[1].label, "Excellent")
-expect("range 1", report.bands[1].range, "45–54")
-expect("range 4", report.bands[4].range, "75+")
+expect("range 1", report.bands[1].range, "50–66")
+expect("range 2 (two parts)", report.bands[2].range, "45–49, 67–75")
+expect("range 4", report.bands[4].range, "81+")
 
 tap(string.rep("a", 60))
 local r60 = shown[1].opts.report
-expect("60: verdict", r60.tier.id, "comfortable")
-expect("60: colour from the spec", r60.tier.color, "#009E73")
-expect("60: Comfortable is the current range", r60.bands[2].current, true)
-expect("60: Excellent is not", r60.bands[1].current, false)
+expect("60: verdict", r60.tier.id, "excellent")
+expect("60: colour from the spec", r60.tier.color, "#0072B2")
+expect("60: Excellent is the current range", r60.bands[1].current, true)
+expect("60: Comfortable is not", r60.bands[2].current, false)
 
 -- 6. colour is requested only when KOReader is drawing in colour
 tap(string.rep("a", 60), true)
@@ -175,7 +176,7 @@ expect("colour check raised: use_color false", shown[1].opts.use_color, false)
 
 -- 7. if the card cannot be shown, the same information appears as plain text
 local PLAIN = "Characters, with spaces: 18\nCharacters, without spaces: 16\nWords: 3\n\n"
-    .. "Characters per line (select one line):\n45–54  Excellent\n55–64  Comfortable\n65–74  Still readable\n75+  Too long"
+    .. "Characters per line (select one line):\n50–66  Excellent\n45–49, 67–75  Comfortable\n76–80  Still readable\n81+  Too long"
 
 -- 7a. the card module fails to load
 package.loaded["wcount/details"] = nil

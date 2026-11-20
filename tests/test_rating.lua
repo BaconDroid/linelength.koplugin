@@ -10,19 +10,21 @@ local function expect(name, got, want)
     end
 end
 
--- Every band edge, as specified: 45-54 Excellent, 55-64 Comfortable, 65-74 Still readable, 75+ Too long
+-- Every edge. Bands: under 45 short; 50-66 Excellent; 45-49 and 67-75 Comfortable;
+-- 76-80 Still readable; 81+ Too long.
 local cases = {
     { 0, "short", nil },
     { 1, "short", nil },
     { 44, "short", nil },
-    { 45, "excellent", "#0072B2" },
-    { 54, "excellent", "#0072B2" },
-    { 55, "comfortable", "#009E73" },
-    { 64, "comfortable", "#009E73" },
-    { 65, "still_readable", "#E69F00" },
-    { 74, "still_readable", "#E69F00" },
-    { 75, "too_long", "#D55E00" },
-    { 76, "too_long", "#D55E00" },
+    { 45, "comfortable", "#009E73" },
+    { 49, "comfortable", "#009E73" },
+    { 50, "excellent", "#0072B2" },
+    { 66, "excellent", "#0072B2" },
+    { 67, "comfortable", "#009E73" },
+    { 75, "comfortable", "#009E73" },
+    { 76, "still_readable", "#E69F00" },
+    { 80, "still_readable", "#E69F00" },
+    { 81, "too_long", "#D55E00" },
     { 500, "too_long", "#D55E00" },
 }
 for _i, c in ipairs(cases) do
@@ -31,24 +33,41 @@ for _i, c in ipairs(cases) do
     expect("colour for " .. c[1], tier.color, c[3])
 end
 
--- bad input never fails and counts as short
+-- bad input never fails and counts as short; fractions round down
 expect("nil", Rating.forChars(nil).id, "short")
 expect("negative", Rating.forChars(-5).id, "short")
 expect("not a number", Rating.forChars("abc").id, "short")
-expect("numeric string", Rating.forChars("60").id, "comfortable")
+expect("numeric string", Rating.forChars("60").id, "excellent")
+expect("fraction rounds down (66.5 is 66)", Rating.forChars(66.5).id, "excellent")
+expect("fraction rounds down (49.9 is 49)", Rating.forChars(49.9).id, "comfortable")
 
--- exactly one band per count and bands never go down as the count goes up
-local order = { short = 0, excellent = 1, comfortable = 2, still_readable = 3, too_long = 4 }
-local previous = 0
-for n = 0, 300 do
-    local rank = order[Rating.forChars(n).id]
-    if rank == nil or rank < previous then
-        failures = failures + 1
-        print("FAIL band order broke at " .. n)
-        break
-    end
-    previous = rank
+-- exactly one answer for every count 0..300, checked against an independent if-chain, and the
+-- totals worked out by hand: short 0-44 = 45, comfortable 45-49 + 67-75 = 5 + 9 = 14,
+-- excellent 50-66 = 17, still readable 76-80 = 5, too long 81-300 = 220 (45+14+17+5+220 = 301)
+local function expected(n)
+    if n < 45 then return "short" end
+    if n <= 49 then return "comfortable" end
+    if n <= 66 then return "excellent" end
+    if n <= 75 then return "comfortable" end
+    if n <= 80 then return "still_readable" end
+    return "too_long"
 end
+local totals = {}
+for n = 0, 300 do
+    local id = Rating.forChars(n).id
+    expect("oracle at " .. n, id, expected(n))
+    totals[id] = (totals[id] or 0) + 1
+end
+expect("total short", totals.short, 45)
+expect("total comfortable", totals.comfortable, 14)
+expect("total excellent", totals.excellent, 17)
+expect("total still readable", totals.still_readable, 5)
+expect("total too long", totals.too_long, 220)
+
+-- the best band comes first, "short" is not one of the listed bands
+local ids = {}
+for _i, band in ipairs(Rating.BANDS) do ids[#ids + 1] = band.id end
+expect("band order", table.concat(ids, ","), "excellent,comfortable,still_readable,too_long")
 
 -- hex parsing: the four colours from the spec, and bad input
 local function rgb(hex)
@@ -67,10 +86,8 @@ expect("nil hex", Rating.parseHex(nil), nil)
 expect("number", Rating.parseHex(123456), nil)
 
 -- every colour in the table must parse
-for _i, tier in ipairs(Rating.TIERS) do
-    if tier.color then
-        expect("table colour parses: " .. tier.id, Rating.parseHex(tier.color) ~= nil, true)
-    end
+for _i, band in ipairs(Rating.BANDS) do
+    expect("table colour parses: " .. band.id, Rating.parseHex(band.color) ~= nil, true)
 end
 
 if failures > 0 then
