@@ -2,9 +2,9 @@
 package.path = "./?.lua;" .. package.path
 
 -- ---- stubs --------------------------------------------------------------------------------
-local shown, ticks, dirty, warns, infos = {}, {}, {}, {}, {}
+local shown, warns = {}, {}
 local color_state = { on = true } -- true, false, or "error" (isColorEnabled raises)
-local BLACK = { black = true }
+local details_opts = {}           -- what the card was asked to show
 
 local function extend(base, t)
     t = t or {}
@@ -22,25 +22,15 @@ package.preload["ui/widget/container/widgetcontainer"] = function()
 end
 package.preload["ui/widget/infomessage"] = function()
     local I = {}
-    function I:new(o) return o end
+    function I:new(o) o.is_infomessage = true; return o end
     return I
 end
--- Deliberately no nextTick: the plugin must wait for the dialog's first paint (tickAfterNext).
+-- Only show(): the button no longer schedules or refreshes anything. Any leftover use of
+-- tickAfterNext/nextTick/setDirty in main.lua would raise here.
 package.preload["ui/uimanager"] = function()
-    return {
-        show = function(_self, w) shown[#shown + 1] = w end,
-        tickAfterNext = function(_self, fn) ticks[#ticks + 1] = fn end,
-        setDirty = function(_self, widget, mode, dimen, dither)
-            dirty[#dirty + 1] = { widget = widget, mode = mode, dimen = dimen, dither = dither }
-        end,
-    }
+    return { show = function(_self, w) shown[#shown + 1] = w end }
 end
-package.preload["ffi/blitbuffer"] = function()
-    return {
-        COLOR_BLACK = BLACK,
-        ColorRGB32 = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end,
-    }
-end
+-- No ffi/blitbuffer stub on purpose: main.lua must not need it any more.
 package.preload["device"] = function()
     return { screen = { isColorEnabled = function()
         if color_state.on == "error" then error("no screen") end
@@ -50,7 +40,7 @@ end
 package.preload["logger"] = function()
     return {
         dbg = function() end,
-        info = function(...) infos[#infos + 1] = { ... } end,
+        info = function() end,
         warn = function(...) warns[#warns + 1] = { ... } end,
     }
 end
@@ -73,19 +63,19 @@ package.preload["util"] = function()
     end
     return util
 end
+-- the card is stubbed here (it is checked by rendering it in KOReader, see tests/render)
+local DetailsStub = {}
+function DetailsStub:new(o)
+    details_opts[#details_opts + 1] = o
+    return { is_details = true, opts = o }
+end
+package.preload["wcount/details"] = function() return DetailsStub end
 
 local failures = 0
 local function expect(name, got, want)
     if got ~= want then
         failures = failures + 1
         print(string.format("FAIL %s: got %q, want %q", name, tostring(got), tostring(want)))
-    end
-end
-local function expectColor(name, c, r, g, b)
-    if type(c) ~= "table" or c.r ~= r or c.g ~= g or c.b ~= b or c.a ~= 255 then
-        failures = failures + 1
-        local got = type(c) == "table" and (c.black and "BLACK" or (tostring(c.r) .. "," .. tostring(c.g) .. "," .. tostring(c.b))) or tostring(c)
-        print(string.format("FAIL %s: got %s, want %d,%d,%d", name, got, r, g, b))
     end
 end
 
@@ -121,124 +111,98 @@ expect("no highlight module: init does not crash", (pcall(makePlugin, { document
 
 local button_fn = hl._highlight_buttons["13_line_length"]
 
--- 3. label for a selection (cleaned like Copy: ends trimmed, spaces collapsed): 18 characters
-local sample = { selected_text = { text = "  Hello   world,\n\n again  " } }
+-- 3. the button is as plain as the others: just a label and a tap handler, no colour hooks
+local sample = { selected_text = { text = "  Hello   world,\n\n again  " } } -- cleaned: 18 characters
 local btn = button_fn(sample)
 expect("label", btn.text, "Line: 18 chars · Short")
-expect("button id", btn.id, "wordcount_line_length")
-local LEGEND = "Characters per line (select one line):\n45–54  Excellent\n55–64  Comfortable\n65–74  Still readable\n75+  Too long"
-btn.callback()
-expect("tap shows one popup", #shown, 1)
-expect("popup text", shown[1].text,
-    "Characters, with spaces: 18\nCharacters, without spaces: 16\nWords: 3\n\n" .. LEGEND)
+local keys = {}
+for k in pairs(btn) do keys[#keys + 1] = k end
+table.sort(keys)
+expect("button has only text and callback", table.concat(keys, ","), "callback,text")
 expect("label follows the selection", button_fn({ selected_text = { text = "one" } }).text, "Line: 3 chars · Short")
 expect("nil selected_text", button_fn({}).text, "Line: 0 chars · Short")
 expect("nil text", button_fn({ selected_text = {} }).text, "Line: 0 chars · Short")
 expect("nil highlight", button_fn(nil).text, "Line: 0 chars · Short")
+expect("the card is not loaded until needed", package.loaded["wcount/details"], nil)
 
--- helper: press the button for a selection of n characters, then let the dialog "exist" and run
--- the scheduled ticks, like KOReader does two UI ticks after onShowHighlightMenu returns
-local function press(n, opts)
-    opts = opts or {}
-    ticks, dirty, warns, infos = {}, {}, {}, {}
-    color_state.on = opts.color == nil and true or opts.color
-    local label = { fgcolor = BLACK }
-    if opts.textbox then
-        label.updated = 0
-        label.update = function(self) self.updated = self.updated + 1 end
-    end
-    local button = { label_widget = label, dimen = opts.dimen }
-    local this = { selected_text = { text = string.rep("a", n) } }
-    local b = button_fn(this)
-    local dialog = { dimen = opts.dialog_dimen }
-    if opts.dialog == "broken" then
-        dialog.buttontable = { button_by_id = setmetatable({}, { __index = function() error("boom") end }) }
-        this.highlight_dialog = dialog
-    elseif opts.dialog ~= "none" then
-        dialog.buttontable = { button_by_id = { [b.id] = button } }
-        this.highlight_dialog = dialog
-    end
-    for _i, t in ipairs(ticks) do t() end
-    return b, label, button, dialog
-end
-
--- 4. every band: text and colour, at both edges (spec: #0072B2 #009E73 #E69F00 #D55E00)
+-- 4. the label at every band edge
 local bands = {
-    { 45, "Line: 45 chars · Excellent", 0, 114, 178 },
-    { 54, "Line: 54 chars · Excellent", 0, 114, 178 },
-    { 55, "Line: 55 chars · Comfortable", 0, 158, 115 },
-    { 64, "Line: 64 chars · Comfortable", 0, 158, 115 },
-    { 65, "Line: 65 chars · Still readable", 230, 159, 0 },
-    { 74, "Line: 74 chars · Still readable", 230, 159, 0 },
-    { 75, "Line: 75 chars · Too long", 213, 94, 0 },
-    { 200, "Line: 200 chars · Too long", 213, 94, 0 },
+    { 44, "Short" }, { 45, "Excellent" }, { 54, "Excellent" }, { 55, "Comfortable" },
+    { 64, "Comfortable" }, { 65, "Still readable" }, { 74, "Still readable" },
+    { 75, "Too long" }, { 200, "Too long" },
 }
 for _i, c in ipairs(bands) do
-    local b, label = press(c[1])
-    expect("text at " .. c[1], b.text, c[2])
-    expectColor("colour at " .. c[1], label.fgcolor, c[3], c[4], c[5])
-    expect("one tick scheduled at " .. c[1], #ticks, 1)
+    local b = button_fn({ selected_text = { text = string.rep("a", c[1]) } })
+    expect("label at " .. c[1], b.text, "Line: " .. c[1] .. " chars · " .. c[2])
 end
 
--- 5. below 45 the text stays in the standard colour, and nothing is scheduled
-for _i, n in ipairs({ 0, 1, 44 }) do
-    local b, label = press(n)
-    expect("short text at " .. n, b.text, "Line: " .. n .. " chars · Short")
-    expect("short keeps standard colour at " .. n, label.fgcolor, BLACK)
-    expect("short schedules nothing at " .. n, #ticks, 0)
+-- 5. tapping shows the card with the report for that selection
+local function tap(text, color)
+    shown, warns, details_opts = {}, {}, {}
+    color_state.on = color == nil and true or color
+    button_fn({ selected_text = { text = text } }).callback()
 end
 
--- 6. no colour output: standard colour, text still shown, nothing scheduled, no refresh
-local b6, label6 = press(60, { color = false, dimen = { x = 1, y = 2, w = 3, h = 4 } })
-expect("colour off: text still shown", b6.text, "Line: 60 chars · Comfortable")
-expect("colour off: standard colour", label6.fgcolor, BLACK)
-expect("colour off: nothing scheduled", #ticks, 0)
-expect("colour off: no refresh", #dirty, 0)
+tap(sample.selected_text.text)
+expect("tap shows one widget", #shown, 1)
+expect("it is the card", shown[1].is_details, true)
+local report = shown[1].opts.report
+expect("report chars", report.chars, 18)
+expect("report chars without spaces", report.chars_no_spaces, 16)
+expect("report words", report.words, 3)
+expect("report verdict", report.tier.id, "short")
+expect("report verdict label", report.tier.label, "Short")
+expect("short has no colour", report.tier.color, nil)
+expect("four ranges", #report.bands, 4)
+expect("range label is translated text", report.bands[1].label, "Excellent")
+expect("range 1", report.bands[1].range, "45–54")
+expect("range 4", report.bands[4].range, "75+")
 
--- 7. isColorEnabled raising is treated as "no colour"
-local b7, label7 = press(60, { color = "error" })
-expect("colour check error: text still shown", b7.text, "Line: 60 chars · Comfortable")
-expect("colour check error: standard colour", label7.fgcolor, BLACK)
+tap(string.rep("a", 60))
+local r60 = shown[1].opts.report
+expect("60: verdict", r60.tier.id, "comfortable")
+expect("60: colour from the spec", r60.tier.color, "#009E73")
+expect("60: Comfortable is the current range", r60.bands[2].current, true)
+expect("60: Excellent is not", r60.bands[1].current, false)
 
--- 8. the dialog or button is not where expected: standard colour, no crash, one warning in the log
-local _b8, label8 = press(60, { dialog = "none" })
-expect("no dialog: standard colour", label8.fgcolor, BLACK)
-expect("no dialog: one warning explains why", #warns, 1)
+-- 6. colour is requested only when KOReader is drawing in colour
+tap(string.rep("a", 60), true)
+expect("colour screen: use_color", shown[1].opts.use_color, true)
+tap(string.rep("a", 60), false)
+expect("no colour: use_color false", shown[1].opts.use_color, false)
+tap(string.rep("a", 60), "error")
+expect("colour check raised: use_color false", shown[1].opts.use_color, false)
 
--- 9. an exception while colouring is caught and logged once
-local _b9, label9 = press(60, { dialog = "broken" })
-expect("broken dialog: standard colour", label9.fgcolor, BLACK)
-expect("broken dialog: one warning", #warns, 1)
+-- 7. if the card cannot be shown, the same information appears as plain text
+local PLAIN = "Characters, with spaces: 18\nCharacters, without spaces: 16\nWords: 3\n\n"
+    .. "Characters per line (select one line):\n45–54  Excellent\n55–64  Comfortable\n65–74  Still readable\n75+  Too long"
 
--- 10. the colour refresh: dithered "partial" (the only kind that reaches a colour waveform on
--- Kaleido screens; a "ui" refresh would stay greyscale), on the button's area
-local dimen = { x = 10, y = 20, w = 100, h = 40 }
-local _b10, _l10, _btn10, dialog10 = press(60, { dimen = dimen })
-expect("one refresh requested", #dirty, 1)
-expect("refresh widget is the dialog", dirty[1].widget, dialog10)
-expect("refresh type is partial", dirty[1].mode, "partial")
-expect("refresh region is the button", dirty[1].dimen, dimen)
-expect("refresh is dithered", dirty[1].dither, true)
-expect("success is logged once", #infos, 1)
+-- 7a. the card module fails to load
+package.loaded["wcount/details"] = nil
+package.preload["wcount/details"] = function() error("boom") end
+tap(sample.selected_text.text)
+expect("load failure: one widget", #shown, 1)
+expect("load failure: plain text popup", shown[1].is_infomessage, true)
+expect("load failure: same information", shown[1].text, PLAIN)
+expect("load failure: one warning", #warns, 1)
 
--- button not laid out yet: fall back to the dialog's area
-local dialog_dimen = { x = 0, y = 100, w = 900, h = 600 }
-local _b10b, _l10b, _btn10b, dialog10b = press(60, { dialog_dimen = dialog_dimen })
-expect("fallback refresh requested", #dirty, 1)
-expect("fallback region is the dialog", dirty[1].dimen, dialog_dimen)
-expect("fallback is dithered partial", dirty[1].mode .. tostring(dirty[1].dither), "partialtrue")
+-- 7b. the card raises while it is being built
+package.loaded["wcount/details"] = nil
+package.preload["wcount/details"] = function()
+    return { new = function() error("kaboom") end }
+end
+tap(sample.selected_text.text)
+expect("build failure: plain text popup", shown[1] and shown[1].is_infomessage, true)
+expect("build failure: same information", shown[1] and shown[1].text, PLAIN)
+expect("build failure: one warning", #warns, 1)
 
--- no region at all: colour is still set, no refresh is requested, and the log says so
-local _b10c, l10c = press(60)
-expectColor("no region: colour still set", l10c.fgcolor, 0, 158, 115)
-expect("no region: no refresh", #dirty, 0)
-expect("no region: logged", infos[1][4], "no region to refresh")
+-- back to the normal stub: the card works again afterwards
+package.loaded["wcount/details"] = nil
+package.preload["wcount/details"] = function() return DetailsStub end
+tap(sample.selected_text.text)
+expect("recovers after a failure", shown[1] and shown[1].is_details, true)
 
--- a TextBoxWidget label needs update() to take the colour
-local _b10d, l10d = press(60, { textbox = true })
-expect("TextBoxWidget label updated once", l10d.updated, 1)
-
--- 11. position: keys sort as strings; ours must come after every built-in one
+-- 8. position: keys sort as strings; ours must come after every built-in one
 local builtin = { "01_select", "02_highlight", "03_copy", "04_add_note", "05_wikipedia",
     "06_dictionary", "07_translate", "08_share_text", "09_view_html", "10_user_dict",
     "11_follow_link", "12_generate_qr_code", "12_search" }
@@ -246,21 +210,20 @@ for _i, key in ipairs(builtin) do
     expect("sorts after " .. key, "13_line_length" > key, true)
 end
 
--- 12. layout: the same assembly ReaderHighlight:onShowHighlightMenu does (2 columns, sorted keys)
-local function layout(keys)
-    table.sort(keys)
+-- 9. layout: the same assembly ReaderHighlight:onShowHighlightMenu does (2 columns, sorted keys)
+local function layout(ks)
+    table.sort(ks)
     local rows = { {} }
-    for _i, k in ipairs(keys) do
+    for _i, k in ipairs(ks) do
         if #rows[#rows] >= 2 then rows[#rows + 1] = {} end
         table.insert(rows[#rows], k)
     end
     return rows
 end
--- the ten buttons on a Libra Colour in a normal book, plus ours
-local keys = { "01_select", "02_highlight", "03_copy", "04_add_note", "05_wikipedia",
+local ks = { "01_select", "02_highlight", "03_copy", "04_add_note", "05_wikipedia",
     "06_dictionary", "07_translate", "09_view_html", "12_generate_qr_code", "12_search",
     "13_line_length" }
-local rows = layout(keys)
+local rows = layout(ks)
 expect("rows", #rows, 6)
 expect("ours is alone on a full-width last row", #rows[#rows], 1)
 expect("and it is ours", rows[#rows][1], "13_line_length")

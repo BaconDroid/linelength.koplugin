@@ -1,0 +1,177 @@
+-- The details card of the Word count plugin: a small dialog with the characters of the selection,
+-- a verdict for the line length, the counts, and the four ranges with the current one marked.
+-- Built from KOReader's own widgets and modelled on InfoMessage (tap anywhere to close).
+-- It takes a report from wcount/report and never touches the selection itself.
+local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local Device = require("device")
+local Font = require("ui/font")
+local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
+local InputContainer = require("ui/widget/container/inputcontainer")
+local LeftContainer = require("ui/widget/container/leftcontainer")
+local LineWidget = require("ui/widget/linewidget")
+local OverlapGroup = require("ui/widget/overlapgroup")
+local RightContainer = require("ui/widget/container/rightcontainer")
+local Size = require("ui/size")
+local TextWidget = require("wcount/colortext") -- TextWidget that can keep colour (see that file)
+local UIManager = require("ui/uimanager")
+local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
+local _ = require("gettext")
+local Input = Device.input
+local Screen = Device.screen
+
+local Rating = require("wcount/rating")
+
+local Details = InputContainer:extend{
+    modal = true,
+    report = nil,       -- from wcount/report
+    use_color = false,  -- true when the screen is drawing in colour
+}
+
+function Details:init()
+    if Device:hasKeys() then
+        self.key_events.AnyKeyPressed = { { Input.group.Any } }
+    end
+    if Device:isTouchDevice() then
+        self.ges_events.TapClose = {
+            GestureRange:new{
+                ges = "tap",
+                range = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() },
+            },
+        }
+    end
+
+    local report = self.report
+    local border = Size.border.window
+    local padding = Screen:scaleBySize(18)
+    local card_width = math.floor(Screen:getWidth() * 0.8)
+    local width = card_width - 2 * (border + padding) -- width of the content inside the card
+
+    local title_face = Font:getFace("tfont", 24)
+    local big_face = Font:getFace("tfont", 72)
+    local verdict_face = Font:getFace("tfont", 30)
+    local small_face = Font:getFace("x_smallinfofont")
+    local row_face = Font:getFace("smallinfofont")
+    local row_bold_face = Font:getFace("smallinfofontbold")
+    local hint_face = Font:getFace("xx_smallinfofont")
+
+    -- "#RRGGBB" to a colour, or nil (standard text colour) when the screen is not drawing in colour
+    local function color(hex)
+        if not (self.use_color and hex) then
+            return nil
+        end
+        local r, g, b = Rating.parseHex(hex)
+        if not r then
+            return nil
+        end
+        return Blitbuffer.ColorRGB32(r, g, b, 0xFF)
+    end
+
+    local function centered(text, face, fgcolor)
+        local widget = TextWidget:new{ text = text, face = face, fgcolor = fgcolor, max_width = width }
+        return CenterContainer:new{ dimen = Geom:new{ w = width, h = widget:getSize().h }, widget }
+    end
+
+    -- label on the left, value on the right
+    local function row(left_text, right_text, left_face, right_face, left_color, right_color)
+        local left = TextWidget:new{ text = left_text, face = left_face, fgcolor = left_color }
+        local right = TextWidget:new{ text = right_text, face = right_face, fgcolor = right_color }
+        local height = math.max(left:getSize().h, right:getSize().h)
+        local dimen = Geom:new{ w = width, h = height }
+        return OverlapGroup:new{
+            dimen = dimen,
+            LeftContainer:new{ dimen = Geom:new{ w = width, h = height }, left },
+            RightContainer:new{ dimen = Geom:new{ w = width, h = height }, right },
+        }
+    end
+
+    local function divider()
+        return LineWidget:new{
+            background = Blitbuffer.COLOR_GRAY,
+            dimen = Geom:new{ w = width, h = Size.line.medium },
+        }
+    end
+
+    local function gap(size)
+        return VerticalSpan:new{ width = Screen:scaleBySize(size) }
+    end
+
+    local tier_color = color(report.tier.color)
+
+    local content = VerticalGroup:new{ align = "center" }
+    table.insert(content, centered(_("Line length"), title_face))
+    table.insert(content, gap(6))
+    table.insert(content, divider())
+    table.insert(content, gap(10))
+    table.insert(content, centered(string.format("%d", report.chars), big_face, tier_color))
+    table.insert(content, centered(_("characters"), small_face))
+    table.insert(content, gap(4))
+    table.insert(content, centered(report.tier.label, verdict_face, tier_color))
+    table.insert(content, gap(12))
+    table.insert(content, divider())
+    table.insert(content, gap(8))
+    table.insert(content, row(_("With spaces"), string.format("%d", report.chars), row_face, row_bold_face))
+    table.insert(content, row(_("Without spaces"), string.format("%d", report.chars_no_spaces), row_face, row_bold_face))
+    table.insert(content, row(_("Words"), string.format("%d", report.words), row_face, row_bold_face))
+    table.insert(content, gap(8))
+    table.insert(content, divider())
+    table.insert(content, gap(8))
+    for _i, band in ipairs(report.bands) do
+        local face = band.current and row_bold_face or row_face
+        local band_color = color(band.color)
+        table.insert(content, row((band.current and "● " or "○ ") .. band.label, band.range, face, face, band_color, band_color))
+    end
+    table.insert(content, gap(8))
+    table.insert(content, centered(_("Select one line of text to measure it."), hint_face, Blitbuffer.COLOR_DARK_GRAY))
+
+    self.frame = FrameContainer:new{
+        background = Blitbuffer.COLOR_WHITE,
+        radius = Size.radius.window,
+        bordersize = border,
+        padding = padding,
+        margin = 0,
+        content,
+    }
+    self[1] = CenterContainer:new{
+        dimen = Screen:getSize(),
+        self.frame,
+    }
+
+    if self.use_color then
+        -- Marks the widget for dithered refreshes, which is what selects a colour waveform on
+        -- Kaleido screens (a plain "ui" refresh never shows colour there).
+        self.dithered = true
+    end
+end
+
+function Details:onShow()
+    local use_color = self.use_color
+    UIManager:setDirty(self, function()
+        if use_color then
+            return "partial", self.frame.dimen, true
+        end
+        return "ui", self.frame.dimen
+    end)
+    return true
+end
+
+function Details:onCloseWidget()
+    UIManager:setDirty(nil, function()
+        return "ui", self.frame.dimen
+    end)
+end
+
+function Details:onTapClose()
+    UIManager:close(self)
+    return true
+end
+
+function Details:onAnyKeyPressed()
+    UIManager:close(self)
+    return true
+end
+
+return Details

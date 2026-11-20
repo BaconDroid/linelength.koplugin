@@ -1,7 +1,6 @@
 -- Word count: after you select text, adds one button to the dialog (Select, Highlight, Copy, ...)
 -- that shows the length of the selection in characters and how that reads as a line of text.
 -- Tap it for the details: characters with and without spaces, words, and the ranges.
-local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
@@ -13,6 +12,7 @@ local T = require("ffi/util").template
 
 local Counter = require("wcount/counter")
 local Rating = require("wcount/rating")
+local Report = require("wcount/report")
 
 local WordCount = WidgetContainer:extend{
     name = "wordcount",
@@ -23,7 +23,6 @@ local WordCount = WidgetContainer:extend{
 -- 01_select to 12_search (the QR code plugin sits at 12_generate_qr_code), so "13" puts ours last:
 -- alone on a full-width row when the number of other buttons is even.
 local SLOT = "13_line_length"
-local BUTTON_ID = "wordcount_line_length"
 
 local LABELS = {
     too_long = _("Too long"),
@@ -48,67 +47,37 @@ local function n(value)
     return string.format("%d", value)
 end
 
--- "45–54  Excellent" lines for the popup, lowest band first, built from the same table as the rating.
-local function legend()
-    local tiers = Rating.TIERS
-    local lines = {}
-    for i = #tiers - 1, 1, -1 do
-        local tier = tiers[i]
-        local upper = tiers[i - 1] and (tiers[i - 1].min - 1)
-        local range = upper and string.format("%d–%d", tier.min, upper) or string.format("%d+", tier.min)
-        lines[#lines + 1] = range .. "  " .. LABELS[tier.id]
-    end
-    return table.concat(lines, "\n")
-end
-
-local function showDetails(c)
-    UIManager:show(InfoMessage:new{
-        text = T(_("Characters, with spaces: %1\nCharacters, without spaces: %2\nWords: %3"),
-                n(c.chars), n(c.chars_no_spaces), n(c.words))
-            .. "\n\n" .. _("Characters per line (select one line):") .. "\n" .. legend(),
-    })
-end
-
 -- Colour only when KOReader is actually drawing in colour: that is true on a colour screen unless
--- the user turned "Color rendering" off. On a black-and-white screen, or with colour off, the text
--- keeps its standard colour.
+-- the user turned "Color rendering" off. On a black-and-white screen, or with colour off, the card
+-- uses the standard text colour.
 local function colorEnabled()
     local ok, enabled = pcall(function() return Device.screen:isColorEnabled() end)
     return ok and enabled == true
 end
 
--- A dialog button has no text-colour option (ButtonTable forwards a fixed list of fields), so once
--- the dialog exists we reach the button through ButtonDialog.buttontable.button_by_id and set the
--- colour of its label, which TextWidget reads when it paints.
---
--- Setting the colour is not enough on a colour e-ink screen: the dialog is drawn with a "ui"
--- refresh, and on Kaleido screens that waveform never shows colour (the framebuffer driver only
--- switches to a colour waveform for "partial" or "full" refreshes that carry the dither flag).
--- So the button is also redrawn with a dithered "partial" refresh, which uses the colour REAGL waveform.
-local function tint(highlight, tier)
-    local r, g, b = Rating.parseHex(tier.color)
-    local dialog = highlight and highlight.highlight_dialog
-    local button_table = dialog and dialog.buttontable
-    local button = button_table and button_table.button_by_id and button_table.button_by_id[BUTTON_ID]
-    local label = button and button.label_widget
-    if not (r and label) then
-        logger.warn("wordcount: could not colour the button: dialog or button not found")
-        return
+-- The same information as the card, as plain text. Used if the card cannot be built.
+local function plainText(report)
+    local lines = {}
+    for _i, band in ipairs(report.bands) do
+        lines[#lines + 1] = band.range .. "  " .. band.label
     end
-    label.fgcolor = Blitbuffer.ColorRGB32(r, g, b, 0xFF)
-    if label.update then -- a TextBoxWidget needs a redraw to take the new colour
-        label:update()
+    return T(_("Characters, with spaces: %1\nCharacters, without spaces: %2\nWords: %3"),
+            n(report.chars), n(report.chars_no_spaces), n(report.words))
+        .. "\n\n" .. _("Characters per line (select one line):") .. "\n" .. table.concat(lines, "\n")
+end
+
+local function showDetails(counts)
+    local report = Report.build(counts, LABELS)
+    -- The card is loaded on demand and guarded: whatever goes wrong with it, the button stays and
+    -- the information is still shown.
+    local ok, err = pcall(function()
+        local Details = require("wcount/details")
+        UIManager:show(Details:new{ report = report, use_color = colorEnabled() })
+    end)
+    if not ok then
+        logger.warn("wordcount: could not show the details card, using plain text:", err)
+        UIManager:show(InfoMessage:new{ text = plainText(report) })
     end
-    local region = button.dimen
-    if not (region and region.x and region.y) then
-        region = dialog.dimen
-    end
-    local refreshed = region and region.x and region.y
-    if refreshed then
-        UIManager:setDirty(dialog, "partial", region, true)
-    end
-    logger.info("wordcount: coloured the line length button", tier.id, tier.color,
-        refreshed and "refreshed" or "no region to refresh")
 end
 
 function WordCount:init()
@@ -120,18 +89,7 @@ function WordCount:init()
     self.ui.highlight:addToHighlightDialog(SLOT, function(this)
         local c = countSelection(this)
         local tier = Rating.forChars(c.chars)
-        if tier.color and colorEnabled() then
-            -- Two ticks from now: the dialog has been built from the button returned below and
-            -- painted once, so the button exists and has a position on screen.
-            UIManager:tickAfterNext(function()
-                local ok, err = pcall(tint, this, tier)
-                if not ok then
-                    logger.warn("wordcount: colouring failed:", err)
-                end
-            end)
-        end
         return {
-            id = BUTTON_ID,
             text = T(_("Line: %1 chars · %2"), n(c.chars), LABELS[tier.id]),
             callback = function() showDetails(c) end,
         }
