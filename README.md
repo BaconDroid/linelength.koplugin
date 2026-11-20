@@ -3,9 +3,11 @@
 Select one line of text in KOReader and the highlight dialog tells you how many characters it holds
 and whether that is a good line length for reading. Tap the button for the details.
 
-```
-Line: 58 chars · Excellent
-```
+| <img src="docs/selection-dialog.png" width="400" alt="The selection dialog in KOReader with an extra last button reading Line: 56 chars, Excellent"> | <img src="docs/details-card.png" width="400" alt="The details card: 56 characters, Excellent, counts with and without spaces, words, and the four ranges"> |
+|:---:|:---:|
+| *The selection dialog after selecting a line. The extra button at the bottom shows how many characters the line has (56 here) and where that falls: Excellent.* | *Tap the button for the card: the count with and without spaces, the word count, and the four ranges with yours marked. It is drawn in colour on a colour screen.* |
+
+Screenshots from a Kobo Libra Colour running KOReader v2026.07.2.
 
 ## Requirements
 
