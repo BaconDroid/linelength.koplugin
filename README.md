@@ -58,6 +58,10 @@ characters, so check two or three.
    its length in characters.
 3. Tap the X in the top right corner to close it. Tapping outside the card closes it too.
 
+In landscape the card is wider (90% of the screen instead of 80%) and has two columns, so that it is wider than
+tall and fits: the number, its verdict and the four ranges on the left, the longest lines and the steppers on
+the right, and the buttons across the bottom. In portrait it is one column. Either way it is centred, and the
+buttons stay where they are when the card shrinks.
 #### Changing the margins and the text size from the card
 
 Under the ranges the card has two steppers, **Margins** and **Text size**, each with a **−** and a **+** around
@@ -82,9 +86,9 @@ the current value, and two buttons: **Cancel** and **Done**.
 - After each tap the book is laid out again, the page is measured again, and the card shows the new numbers.
   The line numbers (`L5`) are those of the new layout.
 - KOReader renders only the chapter you are in when you change a setting, and only when it next draws the page
-  ("partial rerendering", on by default for books with several chapters). The plugin draws the page first and
-  measures it after, so the numbers are for the page as it is now, not for the one before your last tap. A tap can
-  take a little longer for that.
+  ("partial rerendering", on by default for books with several chapters). The plugin lets KOReader draw the page
+  first, into a buffer that is never shown (so the screen is not refreshed for it), and measures it after, so the
+  numbers are for the page as it is now, not for the one before your last tap. A tap can take a little longer for that.
 - **Margins** are the left and right margins together; the top and bottom margins are not touched. They are
   changed by the same amount on both sides, so margins that differ stay different (the stepper then shows
   both, like `10/14`).
@@ -208,9 +212,13 @@ the margin and text size controls (with Cancel, Accept and Done) and the colours
   tapped and is full size again when Accept or Cancel is tapped; it never schedules anything. If building the
   card fails, the same information is shown as plain text.
 - After a change, `main.lua` measures the page through `measureSettled`: when KOReader says the rendering is delayed
-  (`isRerenderingDelayed`) it draws the page with KOReader's own paint, which renders it, and measures again until
-  two measurements agree (three draws at most). Without that, the first measurement is of the old layout and the
-  card is one change behind. A fully rendered book is measured at once and nothing is drawn.
+  (`isRerenderingDelayed`) it has KOReader's own paint (`ui.view:paintTo`) draw the page into an off-screen
+  buffer, which renders it and puts it back where it was, and measures again until two measurements agree (three
+  draws at most). Without that, the first measurement is of the old layout and the card is one change behind. The
+  buffer is never put on the screen, so none of these draws is a refresh of the e-ink panel (on a colour Kobo each
+  whole-screen refresh is a visible blink); it is given back when the measurement is done. If KOReader gives no
+  reader view or no buffer, or the paint fails, the page is drawn on the screen instead (and a warning is logged).
+  A fully rendered book is measured at once and nothing is drawn.
 - `linelength/layout.lua` works out one step of the margins or the text size, in the units KOReader's own
   menus use. It does not use KOReader, so it is tested on a desktop. `main.lua` applies a step the way the
   Typeset menu does: a `ConfigChange` event (which is what stores the value with the book) and then
@@ -258,6 +266,14 @@ when it is full size.
 cache; `tests/fixtures/make_epub_chapters.py` builds one): after every tap the card must show what the page holds
 once it has been drawn, and so must the full card after Accept and the card when it is opened again. Before the
 page was drawn first, every one of these taps showed the previous tap's numbers.
+
+`tests/screens.lua` lays the cards out on the screen size it is started with (any size, portrait or landscape)
+and checks that every card fits with room around it, is centred, takes 80% of the width in portrait and 90%
+in landscape, is wider than tall in landscape, shows everything it should (nothing goes missing from a
+column), keeps the same air above the buttons, and keeps every button where it was when it shrinks and comes
+back. It has been run at the sizes of a Libra Colour, a Clara, a Nia, a Sage and a 600x800 Touch, in both
+orientations. `tests/controls.lua` assumes a portrait screen (it hard-codes the margin steps) and says so
+and stops when started in landscape; `tests/partial.lua` has no fixed numbers and runs in either orientation.
 
 `tests/render.lua` draws the button dialog and the cards with a desktop build of KOReader and saves
 PNGs at the size of a Libra Colour. It shows what the code draws into KOReader's buffer, not what a

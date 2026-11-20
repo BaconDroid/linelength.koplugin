@@ -5,6 +5,7 @@
 --  * the whole page: "Line length: this page" in the Typeset menu (also an action you can put on a gesture)
 --    shows the longest lines on the page that is on screen, rated by the longest one.
 local Device = require("device")
+local Blitbuffer = require("ffi/blitbuffer")
 local Dispatcher = require("dispatcher")
 local Event = require("ui/event")
 local InfoMessage = require("ui/widget/infomessage")
@@ -147,27 +148,68 @@ end
 -- How many times the page is drawn and measured again, at most, to get a measurement that holds still.
 local SETTLE_TRIES = 3
 
+-- A way to let KOReader draw the page without anything reaching the screen. KOReader's reader view paints the page into
+-- whatever buffer it is given, and that paint is also what renders a book that is only rendered when drawn and puts the
+-- page back where it was. So it is given a buffer nobody sees: no refresh is asked of the e-ink panel (on a colour
+-- Kobo each whole-screen refresh is a visible blink). Returns the function that draws and the one that gives the buffer
+-- back. If there is no reader view or no buffer to be had, drawing falls back to a draw on the screen.
+local function newDrawer(ui)
+    local view = ui and ui.view
+    if view and view.paintTo then
+        local screen = Device.screen
+        local ok, buffer = pcall(function()
+            return Blitbuffer.new(screen:getWidth(), screen:getHeight(), screen.bb and screen.bb:getType())
+        end)
+        if ok and buffer then
+            local off_screen = true
+            local function draw()
+                if off_screen then
+                    local painted, err = pcall(view.paintTo, view, buffer, 0, 0)
+                    if painted then
+                        return
+                    end
+                    logger.warn("linelength: could not draw the page off screen, drawing it on the screen:", err)
+                    off_screen = false
+                end
+                UIManager:forceRePaint()
+            end
+            local function release() buffer:free() end
+            return draw, release
+        end
+        logger.warn("linelength: could not get a buffer to draw the page off screen, drawing it on the screen:", buffer)
+    end
+    return function() UIManager:forceRePaint() end, function() end
+end
+
 -- The report for the page on screen after the layout was changed (or when it may have changed).
 -- KOReader renders only the chapter on screen when a setting changes ("partial rerendering": on by default for
 -- EPUBs with several chapters, so a setting can be tried quickly) and does it when it next DRAWS the page. Until then
 -- the lines are those of the old layout, and a measurement made right after the change is one change behind.
 -- So when KOReader says the rendering is delayed, the page is drawn first, with KOReader's own paint (which does the
--- rendering and puts the page back where it was), and measured again until two measurements agree. When the book is
--- fully rendered by the time the change returns, there is nothing to wait for and nothing is drawn.
+-- rendering and puts the page back where it was), into a buffer that is not on the screen, and measured again until two
+-- measurements agree. When the book is fully rendered by the time the change returns, there is nothing to wait for and
+-- nothing is drawn at all.
 function LineLength:measureSettled()
     local report, reason = pageReport(self.ui)
     local ok, delayed = pcall(function() return self.ui.document:isRerenderingDelayed() end)
     if not (ok and delayed) then
         return report, reason
     end
-    for _i = 1, SETTLE_TRIES do
-        UIManager:forceRePaint()
-        local again, again_reason = pageReport(self.ui)
-        local settled = sameReport(report, again)
-        report, reason = again, again_reason
-        if settled then
-            break
+    local draw, release = newDrawer(self.ui)
+    local ok_loop, err = pcall(function()
+        for _i = 1, SETTLE_TRIES do
+            draw()
+            local again, again_reason = pageReport(self.ui)
+            local settled = sameReport(report, again)
+            report, reason = again, again_reason
+            if settled then
+                break
+            end
         end
+    end)
+    release()
+    if not ok_loop then
+        error(err, 0)
     end
     return report, reason
 end

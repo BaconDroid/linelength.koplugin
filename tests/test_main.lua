@@ -40,7 +40,19 @@ package.preload["ui/uimanager"] = function()
         end,
     }
 end
--- No ffi/blitbuffer stub on purpose: main.lua must not need it any more.
+-- The page is drawn into a buffer of its own (never on the screen) to settle the layout: a Blitbuffer that records what it
+-- was asked for and how often it was given back, and a reader view whose paint is that draw.
+local draws = { n = 0, hook = nil, last = nil }
+local buffers = { created = {}, raises = false }
+package.preload["ffi/blitbuffer"] = function()
+    return { new = function(w, h, t)
+        if buffers.raises then error("no memory") end
+        local b = { w = w, h = h, type = t, freed = 0 }
+        function b:free() self.freed = self.freed + 1 end
+        buffers.created[#buffers.created + 1] = b
+        return b
+    end }
+end
 package.preload["device"] = function()
     return { screen = {
         isColorEnabled = function()
@@ -52,6 +64,7 @@ package.preload["device"] = function()
             return 1264
         end,
         getHeight = function() return 1680 end,
+        bb = { getType = function() return "the screen's type" end },
         -- 2 pixels per KOReader unit, so the screen is 632 units wide
         scaleBySize = function(_self, n)
             if screen_state.scale_raises then error("no scale") end
@@ -730,7 +743,7 @@ expect("currentLayout reads the margins", good_layout and good_layout.margins[1]
 expect("currentLayout reads the size", good_layout and good_layout.size, 22)
 
 -- 11k2. Nothing in the tests above drew the page: the books there are rendered when the layout changes
-expect("no page was drawn by the tests that use a fully rendered book", repaints.n, 0)
+expect("no page was drawn by the tests that use a fully rendered book", draws.n, 0)
 
 -- 11n. A book that KOReader renders only when it next DRAWS it (partial rerendering, on by default for EPUBs with
 -- several chapters): right after a change the lines are still the old layout, and the first measurement is one change
@@ -748,9 +761,16 @@ local function delayedPlugin(delayed, texts_for)
     -- a book that is rendered when drawn shows the layout it was last drawn with; a fully rendered one shows the new one at once
     local doc = layoutBook(conf, function() return texts_for(delayed and rendered or conf) end)
     rawset(doc, "isRerenderingDelayed", function() return delayed end)
-    repaints.n, repaints.hook = 0, function() rendered.h_page_margins, rendered.font_size = { conf.h_page_margins[1], conf.h_page_margins[2] }, conf.font_size end
+    local function render() rendered.h_page_margins, rendered.font_size = { conf.h_page_margins[1], conf.h_page_margins[2] }, conf.font_size end
+    draws.n, draws.hook, draws.last, repaints.n, repaints.hook = 0, render, nil, 0, render
+    buffers.created, buffers.raises = {}, false
     local events = {}
     local ui = { menu = newMenu(), highlight = newHighlight(), document = doc, rolling = {} }
+    ui.view = { paintTo = function(_self, bb, x, y)
+        draws.n = draws.n + 1
+        draws.last = { bb = bb, x = x, y = y }
+        if draws.hook then draws.hook() end
+    end }
     function ui:handleEvent(ev)
         local parts = {}
         for i, a in ipairs(ev.args) do parts[i] = show(a) end
@@ -767,21 +787,21 @@ local dp, ddoc, drendered, devents = delayedPlugin(true)
 dp:showPage()
 local dcard = shown[1]
 expect("delayed: the card opens with the page as drawn (70)", dcard.opts.report.chars, 70)
-expect("delayed: opening the card draws nothing", repaints.n, 0)
+expect("delayed: opening the card draws nothing", draws.n, 0)
 dcard.opts.on_control("margins_more") -- 10 -> 25: longest 55 once drawn; until then still 70
 expect("delayed: the card shows the NEW layout (55), not the old one (70)", dcard.updates[1].report.chars, 55)
 expect("delayed: the other two lines are the new layout's too (44 and 30)", dcard.updates[1].report.lines[2].chars .. "," .. dcard.updates[1].report.lines[3].chars, "44,30")
-expect("delayed: the page was drawn twice (the first measurement was stale, the second agreed with the third)", repaints.n, 2)
+expect("delayed: the page was drawn twice (the first measurement was stale, the second agreed with the third)", draws.n, 2)
 expect("delayed: one redraw of the card", #dcard.updates, 1)
 dcard.opts.on_control("text_more") -- 22 -> 23: 55 - 3 = 52
 expect("delayed: the next step is right too (52), not one behind (55)", dcard.updates[2].report.chars, 52)
-expect("delayed: two more draws for it", repaints.n, 4)
+expect("delayed: two more draws for it", draws.n, 4)
 dcard.opts.on_control("margins_less") -- 25 -> 10: 70 - 3 = 67
 expect("delayed: and the next (67)", dcard.updates[3].report.chars, 67)
 expect("delayed: 67 is Comfortable", dcard.updates[3].report.tier.id, "comfortable")
 
 -- Accept measures again. Something changed under the card (the page as drawn is now another one): the full card has to show it
-local before_accept, repaints_before = #dcard.updates, repaints.n
+local before_accept, draws_before = #dcard.updates, draws.n
 ddoc.configurable.font_size = 24; drendered.font_size = 24 -- 70 - 6 = 64 with margins 10
 local events_before = #devents
 dcard.opts.on_control("accept")
@@ -789,7 +809,7 @@ expect("accept: the card is redrawn once", #dcard.updates, before_accept + 1)
 expect("accept: with what the page holds now (64), not what it held at the last step (67)", dcard.updates[#dcard.updates].report.chars, 64)
 expect("accept: the buttons and steppers are given too", dcard.updates[#dcard.updates].values.size .. "," .. flags(dcard.updates[#dcard.updates].controls), "24,1111")
 expect("accept: it changes nothing in the book", #devents, events_before)
-expect("accept: a book that is rendered when drawn gets its page drawn first", repaints.n > repaints_before, true)
+expect("accept: a book that is rendered when drawn gets its page drawn first", draws.n > draws_before, true)
 
 -- not delayed: nothing is drawn, the change is already in the lines
 reset()
@@ -798,10 +818,10 @@ np:showPage()
 local ncard = shown[1]
 ncard.opts.on_control("margins_more")
 expect("not delayed: the card shows the new layout (55)", ncard.updates[1].report.chars, 55)
-expect("not delayed: the page is not drawn by the plugin", repaints.n, 0)
+expect("not delayed: the page is not drawn by the plugin", draws.n, 0)
 ncard.opts.on_control("accept")
 expect("not delayed: accept measures again too (55)", ncard.updates[2].report.chars, 55)
-expect("not delayed: and draws nothing", repaints.n, 0)
+expect("not delayed: and draws nothing", draws.n, 0)
 
 -- asking KOReader whether the rendering is delayed fails: treated as not delayed, the card still updates
 reset()
@@ -811,7 +831,7 @@ fp:showPage()
 local fcard = shown[1]
 fcard.opts.on_control("margins_more")
 expect("delayed? raises: the card is still redrawn", #fcard.updates, 1)
-expect("delayed? raises: nothing is drawn", repaints.n, 0)
+expect("delayed? raises: nothing is drawn", draws.n, 0)
 expect("delayed? raises: no warning (it is a question, not a failure)", #warns, 0)
 
 -- a page that never holds still (every draw changes it): bounded, 3 draws, the last measurement is shown
@@ -820,11 +840,13 @@ local sp, sdoc, srendered = delayedPlugin(true)
 sp:showPage()
 local scard = shown[1]
 local flip = 0
-repaints.hook = function() flip = flip + 1; srendered.font_size = 22 + flip end -- another size every draw
+draws.hook = function() flip = flip + 1; srendered.font_size = 22 + flip end -- another size every draw
 scard.opts.on_control("margins_more")
-expect("never settles: stops after 3 draws", repaints.n, 3)
+expect("never settles: stops after 3 draws", draws.n, 3)
 expect("never settles: the card is redrawn once, with the last measurement (font 25 -> 70 - 10 - 9 = 51 with margins 25)", scard.updates[1].report.chars, 70 + (10 - 10) - 3 * (25 - 22))
 expect("never settles: one redraw", #scard.updates, 1)
+expect("never settles: one buffer for the three draws, given back", #buffers.created .. "/" .. (buffers.created[1] and buffers.created[1].freed or "none"), "1/1")
+expect("never settles: nothing on the screen", repaints.n, 0)
 
 -- the longest line stays the same but the other lines move: that is not settled yet (the lines are compared, not
 -- just the longest)
@@ -838,7 +860,7 @@ local lcard2 = shown[1]
 expect("same longest line: the card opens with the lines as drawn (59 and 45 behind the 70)", lcard2.opts.report.lines[2].chars .. "," .. lcard2.opts.report.lines[3].chars, "59,45")
 lcard2.opts.on_control("text_more")
 expect("same longest line, other lines move: the card shows the settled lines (65 and 40)", lcard2.updates[1].report.lines[2].chars .. "," .. lcard2.updates[1].report.lines[3].chars, "65,40")
-expect("same longest line, other lines move: so a second draw was needed to see it hold", repaints.n, 2)
+expect("same longest line, other lines move: so a second draw was needed to see it hold", draws.n, 2)
 -- the same lines but in other places (the page moved by a line): not settled either
 reset()
 local lp3, _d3, r3 = delayedPlugin(true, function(c)
@@ -850,7 +872,7 @@ local lcard3 = shown[1]
 expect("same lengths in other places: before, the longest is line 2", lcard3.opts.report.lines[1].number, 2)
 lcard3.opts.on_control("text_more")
 expect("same lengths in other places: the card shows the settled places (the longest is line 3)", lcard3.updates[1].report.lines[1].number, 3)
-expect("same lengths in other places: a second draw was needed", repaints.n, 2)
+expect("same lengths in other places: a second draw was needed", draws.n, 2)
 
 -- the page has one more line after the draw (the first lines are the same): not settled either, the lengths of the
 -- lists are compared too
@@ -864,7 +886,7 @@ local lcard4 = shown[1]
 expect("one more line after the draw: before, two lines are listed", #lcard4.opts.report.lines, 2)
 lcard4.opts.on_control("text_more")
 expect("one more line after the draw: the card lists three", #lcard4.updates[1].report.lines, 3)
-expect("one more line after the draw: a second draw was needed", repaints.n, 2)
+expect("one more line after the draw: a second draw was needed", draws.n, 2)
 
 -- the page is empty once it is drawn (a change that pushed the text off it): the old numbers stay, and two empty
 -- measurements in a row count as settled (no draws without end)
@@ -878,7 +900,7 @@ local lcard5 = shown[1]
 lcard5.opts.on_control("text_more")
 expect("an empty page after the draw: the card is redrawn once", #lcard5.updates, 1)
 expect("an empty page after the draw: the old numbers stay (70)", lcard5.updates[1].report.chars, 70)
-expect("an empty page after the draw: settled after 2 draws, not 3", repaints.n, 2)
+expect("an empty page after the draw: settled after 2 draws, not 3", draws.n, 2)
 
 -- measuring raises while settling (here KOReader's clean-up of the text does): logged, the old numbers stay, the card
 -- is still redrawn
@@ -893,7 +915,7 @@ require("util").cleanupSelectedText = util_real
 expect("settling with a page that cannot be read: one warning", #warns, 1)
 expect("settling with a page that cannot be read: the old numbers stay (70)", rcard.updates[1].report.chars, 70)
 expect("settling with a page that cannot be read: the card is redrawn", #rcard.updates, 1)
-expect("settling with a page that cannot be read: nothing was drawn (it failed on the first measurement)", repaints.n, 0)
+expect("settling with a page that cannot be read: nothing was drawn (it failed on the first measurement)", draws.n, 0)
 -- the page can be read at first and fails after the draw: the old numbers stay as well
 reset()
 local rp2 = delayedPlugin(true)
@@ -901,11 +923,12 @@ rp2:showPage()
 local rcard2 = shown[1]
 local calls = 0
 require("util").cleanupSelectedText = function(...) calls = calls + 1; if calls > 4 then error("late boom") end return util_real(...) end
-repaints.hook = function() calls = 100 end
+draws.hook = function() calls = 100 end
 rcard2.opts.on_control("margins_more")
 require("util").cleanupSelectedText = util_real
 expect("a page that fails after the draw: one warning", #warns, 1)
 expect("a page that fails after the draw: the old numbers stay", rcard2.updates[1].report.chars, 70)
+expect("a page that fails after the draw: the buffer is still given back", #buffers.created .. "/" .. (buffers.created[1] and buffers.created[1].freed or "none"), "1/1")
 
 -- Cancel on the shrunk card (revert) also gets the settled page
 reset()
@@ -919,12 +942,81 @@ ccard.opts.on_control("revert")
 expect("revert (delayed): back to the start's 70, not one behind (52)", ccard.updates[3].report.chars, 70)
 expect("revert (delayed): the steppers show 10 and 22", ccard.updates[3].values.margins .. "," .. ccard.updates[3].values.size, "10,22")
 -- Cancel on the full card (cancel) closes the card: nothing is measured, so nothing is drawn
-local repaints_cancel = repaints.n
+local draws_cancel = draws.n
 ccard.opts.on_control("margins_more")
-local repaints_step = repaints.n
+local draws_step = draws.n
 ccard.opts.on_control("cancel")
-expect("cancel (delayed): the card is closing, so the page is not drawn for a measurement", repaints.n, repaints_step)
-repaints.hook = nil
+expect("cancel (delayed): the card is closing, so the page is not drawn for a measurement", draws.n, draws_step)
+draws.hook = nil
+
+-- 11o. Settling puts nothing on the screen: the page is drawn (by the reader's own paint) into a buffer of its own
+do
+reset()
+local op = delayedPlugin(true)
+op:showPage()
+local ocard = shown[1]
+ocard.opts.on_control("margins_more") -- 10 -> 25: 55 once drawn
+expect("off screen: the new layout is measured (55)", ocard.updates[1].report.chars, 55)
+expect("off screen: nothing was drawn on the screen", repaints.n, 0)
+expect("off screen: the page was drawn twice by the reader's paint (to see it hold)", draws.n, 2)
+expect("off screen: into one buffer for the whole settle", #buffers.created, 1)
+local ob = buffers.created[1]
+expect("off screen: the buffer is as big as the screen", ob.w .. "x" .. ob.h, "1264x1680")
+expect("off screen: and of the screen's type", ob.type, "the screen's type")
+expect("off screen: painted at the top left", draws.last.x .. "," .. draws.last.y, "0,0")
+expect("off screen: into that buffer", draws.last.bb, ob)
+expect("off screen: and the buffer is given back, once", ob.freed, 1)
+ocard.opts.on_control("text_more")
+expect("off screen: the next tap gets a buffer of its own, given back too", #buffers.created .. "/" .. buffers.created[2].freed, "2/1")
+ocard.opts.on_control("accept")
+expect("off screen: so does accept", #buffers.created .. "/" .. buffers.created[3].freed, "3/1")
+expect("off screen: still nothing on the screen after three redraws of the card", repaints.n, 0)
+ocard.opts.on_control("margins_more")
+ocard.opts.on_control("cancel") -- the card closes: nothing is measured, so no buffer
+expect("off screen: cancel (full) makes no buffer", #buffers.created, 4)
+
+-- a book that is rendered by the time the change returns: no buffer at all
+reset()
+local op2 = delayedPlugin(false)
+op2:showPage()
+shown[1].opts.on_control("margins_more")
+expect("fully rendered: no buffer is made", #buffers.created, 0)
+expect("fully rendered: nothing is drawn, on or off the screen", draws.n .. "/" .. repaints.n, "0/0")
+
+-- no reader view to ask: the page is drawn on the screen, as KOReader would, and the numbers are right
+reset()
+local op3 = delayedPlugin(true)
+op3:showPage()
+op3.ui.view = nil
+shown[1].opts.on_control("margins_more")
+expect("no reader view: the numbers are right (55)", shown[1].updates[1].report.chars, 55)
+expect("no reader view: the page was drawn on the screen (twice)", repaints.n, 2)
+expect("no reader view: no buffer", #buffers.created, 0)
+expect("no reader view: no warning (nothing went wrong)", #warns, 0)
+
+-- the reader's paint raises: one warning, the rest of the settle draws on the screen, the numbers are right, the buffer is given back
+reset()
+local op4 = delayedPlugin(true)
+op4:showPage()
+op4.ui.view.paintTo = function() error("paint boom") end
+shown[1].opts.on_control("margins_more")
+expect("paint raises: the numbers are right (55)", shown[1].updates[1].report.chars, 55)
+expect("paint raises: one warning for the settle", #warns, 1)
+expect("paint raises: then the page is drawn on the screen (twice)", repaints.n, 2)
+expect("paint raises: the buffer was given back", buffers.created[1].freed, 1)
+
+-- no buffer to be had (out of memory): one warning, drawn on the screen, the numbers are right
+reset()
+local op5 = delayedPlugin(true)
+op5:showPage()
+buffers.raises = true
+shown[1].opts.on_control("margins_more")
+expect("no buffer: the numbers are right (55)", shown[1].updates[1].report.chars, 55)
+expect("no buffer: one warning", #warns, 1)
+expect("no buffer: drawn on the screen (twice)", repaints.n, 2)
+expect("no buffer: and nothing was created", #buffers.created, 0)
+buffers.raises = false
+end
 
 -- 11l. pageValues: what the steppers show. nil when the layout is not known; two numbers when the sides differ
 local pl_v = layoutPlugin({ h_page_margins = { 10, 14 }, font_size = 22.5 })

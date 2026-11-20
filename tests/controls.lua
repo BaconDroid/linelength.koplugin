@@ -19,11 +19,37 @@ local _bb = require("ffi/blitbuffer")
 _bb:setUseCBB(true)
 _bb:enableCBB(true)
 
+-- What really goes to the panel, after UIManager has merged the requests: wrap the screen's refresh functions BEFORE
+-- UIManager is loaded (it keeps references to them). A refresh of the whole screen is a whole-screen blink on a colour Kobo,
+-- and the area that blinks is the area that is refreshed.
+local executed = {}
+do
+    local screen = Device.screen
+    for _i, name in ipairs({ "refreshA2", "refreshFast", "refreshUI", "refreshPartial", "refreshNoMergeUI", "refreshNoMergePartial",
+                             "refreshFlashUI", "refreshFlashPartial", "refreshFull" }) do
+        local original = screen[name]
+        if original then
+            screen[name] = function(self, x, y, w, h, dither)
+                executed[#executed + 1] = { mode = name, x = x or 0, y = y or 0, w = w or screen:getWidth(), h = h or screen:getHeight(), dither = dither }
+                return original(self, x, y, w, h, dither)
+            end
+        end
+    end
+end
+
 local Event = require("ui/event")
 local Geom = require("ui/geometry")
 local UIManager = require("ui/uimanager")
 local Screen = Device.screen
 local util = require("util")
+
+-- This test hard-codes the margin steps of a portrait screen (a step is 5% of the width, so the numbers differ on a wider
+-- one). In landscape use screens.lua (the geometry of the cards) and partial.lua (the whole flow with real taps and no
+-- fixed numbers).
+if Screen:getWidth() > Screen:getHeight() then
+    print("SKIPPED: controls.lua assumes a portrait screen; use screens.lua and partial.lua in landscape")
+    os.exit(0)
+end
 
 local PLUGIN = os.getenv("PLUGIN_DIR")
 package.path = PLUGIN .. "/?.lua;" .. package.path
@@ -169,6 +195,24 @@ local real_setDirty = UIManager.setDirty
 UIManager.setDirty = function(self, ...)
     redraws = redraws + 1
     return real_setDirty(self, ...)
+end
+-- the whole-screen refreshes (at least 90% of the screen) among the ones that went to the panel after the n-th
+local function wholeScreenSince(n)
+    local count = 0
+    for i = n + 1, #executed do
+        local r = executed[i]
+        if r.w * r.h >= 0.9 * Screen:getWidth() * Screen:getHeight() then count = count + 1 end
+    end
+    return count
+end
+-- a refresh of (nearly) the card's own area, and not more: not the small ones of a button, not the whole screen
+local function cardOnlySince(n, dimen)
+    for i = n + 1, #executed do
+        local r = executed[i]
+        local inside = r.x >= dimen.x - 2 and r.y >= dimen.y - 2 and r.x + r.w <= dimen.x + dimen.w + 2 and r.y + r.h <= dimen.y + dimen.h + 2
+        if inside and r.w * r.h >= 0.9 * dimen.w * dimen.h then return true end
+    end
+    return false
 end
 check("the buttons were painted (they have a place on the screen)", card.buttons.margins_more.dimen.w > 0)
 local open_places = places(card)
@@ -358,16 +402,20 @@ tapAt(tx - 200, ty) -- the title text of the shrunk card: inside it, on no butto
 check("shrunk: a tap inside the card off the buttons does nothing", onStack(card) and card.compact == true)
 
 -- more taps: still shrunk, the buttons do not move
+local executed_before_step = #executed
 tapButton(card, "text_more") -- 23 -> 24
+check("a step refreshes the whole screen, once (the page behind the card reflowed)", wholeScreenSince(executed_before_step) == 1, wholeScreenSince(executed_before_step))
 check("a second tap: still shrunk", card.compact == true)
 check("a second tap: the buttons did not move", places(card) == full_places)
 tapButton(card, "margins_more") -- 10 -> 24
 check("a third tap (the other stepper): still shrunk, margins now 24", card.compact == true and pair(conf.h_page_margins) == "24,24" and conf.font_size == 24)
 
 -- Accept: the changes stay and the full card is back with the latest numbers
-local redraws_before_accept = redraws
+local redraws_before_accept, executed_before_accept = redraws, #executed
 tapButton(card, "accept")
 UIManager:forceRePaint()
+check("Accept: only the card is refreshed (nothing changed in the page behind it)", cardOnlySince(executed_before_accept, card.frame.dimen))
+check("Accept: and no refresh of the whole screen", wholeScreenSince(executed_before_accept) == 0, wholeScreenSince(executed_before_accept))
 check("Accept: full size again", card.compact == false and hasText(card, "Longest lines on this page:"))
 check("Accept: the screen was asked to redraw", redraws > redraws_before_accept, redraws - redraws_before_accept)
 check("Accept: the layout is kept (margins 24, size 24)", pair(conf.h_page_margins) == "24,24" and conf.font_size == 24, pair(conf.h_page_margins) .. " / " .. tostring(conf.font_size))
@@ -388,7 +436,9 @@ check("a plain update does not shrink a full size card", card.compact == false)
 -- tap again after Accept, then Cancel: back to how it was when the popup OPENED (also what was accepted)
 tapButton(card, "text_less") -- 24 -> 23
 check("after Accept a tap shrinks the card again", card.compact == true and conf.font_size == 23)
+local executed_before_cancel = #executed
 tapButton(card, "cancel")
+check("Cancel on the shrunk card refreshes the whole screen, once (the page is laid out as it was)", wholeScreenSince(executed_before_cancel) == 1, wholeScreenSince(executed_before_cancel))
 check("Cancel after an Accept: back to when the popup opened (margins 10, size 22)", pair(conf.h_page_margins) == "10,10" and conf.font_size == 22,
     pair(conf.h_page_margins) .. " / " .. tostring(conf.font_size))
 check("Cancel after an Accept: the card is full size and shows the start", card.compact == false and card.report.chars == start_chars and onStack(card))
@@ -471,6 +521,77 @@ local function stubCard(compact, redraw)
     c.got = got
     return c
 end
+-- 9b. Details:refresh asks the screen for what it says: the whole screen when the page behind the card changed, only
+-- the card when it did not; "partial" with dithering on a colour screen (that is what shows the colours on a Kaleido
+-- panel), "ui" otherwise. UIManager drops the dithering flag when the screen has no hardware dithering (this desktop
+-- build), so the requests are read as they are made, in _refresh, before that.
+do
+    local asked = {}
+    local real_ask = UIManager._refresh
+    UIManager._refresh = function(self_, mode, region, dither)
+        asked[#asked + 1] = { mode = mode, dither = dither, region = region and { x = region.x, y = region.y, w = region.w, h = region.h } or nil }
+        return real_ask(self_, mode, region, dither)
+    end
+    local function ask(color, card_only)
+        local c = Details:new{ report = REPORT, controls = CTRL, values = { margins = "10", size = "22" }, use_color = color }
+        UIManager:show(c)
+        UIManager:forceRePaint()
+        asked = {}
+        c:refresh(card_only)
+        UIManager:forceRePaint() -- the refresh is worked out after the card has been painted
+        local frame = c.frame.dimen
+        local list = asked
+        UIManager:close(c)
+        UIManager:forceRePaint()
+        return list, { x = frame.x, y = frame.y, w = frame.w, h = frame.h }
+    end
+    local function has(list, mode, dither, region)
+        for _i, r in ipairs(list) do
+            local same_region
+            if region == nil then
+                same_region = r.region == nil
+            else
+                same_region = r.region ~= nil and r.region.x == region.x and r.region.y == region.y and r.region.w == region.w and r.region.h == region.h
+            end
+            if r.mode == mode and (r.dither or false) == dither and same_region then return true end
+        end
+        return false
+    end
+    local list, frame = ask(true, false)
+    check("refresh (colour, whole screen): partial, no region, dithered", has(list, "partial", true, nil), #list)
+    list, frame = ask(true, true)
+    check("refresh (colour, card only): partial, the card's own area, dithered", has(list, "partial", true, frame), #list)
+    check("refresh (colour, card only): and nothing for the whole screen", not has(list, "partial", true, nil), #list)
+    list, frame = ask(false, false)
+    check("refresh (no colour, whole screen): ui, no region", has(list, "ui", false, nil), #list)
+    list, frame = ask(false, true)
+    check("refresh (no colour, card only): ui, the card's own area", has(list, "ui", false, frame), #list)
+    check("refresh (no colour, card only): and nothing for the whole screen", not has(list, "ui", false, nil), #list)
+    UIManager._refresh = real_ask
+end
+
+-- Accept when the plugin does not redraw (it could not measure): the card still comes back full, and the screen is
+-- asked for the card only (nothing changed in the page behind it)
+do
+    local quiet_accept = stubCard(true, false)
+    UIManager:show(quiet_accept)
+    UIManager:forceRePaint()
+    local before = #executed
+    quiet_accept:press("accept")
+    UIManager:forceRePaint()
+    check("Accept without a redraw from the plugin: the card is full size", quiet_accept.compact == false)
+    check("Accept without a redraw from the plugin: only the card is refreshed", cardOnlySince(before, quiet_accept.frame.dimen))
+    check("Accept without a redraw from the plugin: and nothing for the whole screen", wholeScreenSince(before) == 0, wholeScreenSince(before))
+    -- the card-only refresh was for Accept alone: the next update asks for the whole screen again (nothing else in this
+    -- stub makes KOReader refresh it, so this is the card's own doing)
+    before = #executed
+    quiet_accept:update(REPORT)
+    UIManager:forceRePaint()
+    check("after Accept the next update refreshes the whole screen again", wholeScreenSince(before) == 1, wholeScreenSince(before))
+    UIManager:close(quiet_accept)
+    UIManager:forceRePaint()
+end
+
 -- a stepper tap asks the plugin for it by its own id; the plugin that does not redraw leaves the card as it is
 local quiet = stubCard(false, false)
 quiet:press("text_more")

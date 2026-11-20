@@ -8,5 +8,5 @@ Comfortable, Still readable or Too long. Select a line and tap the button in the
 use "Line length: this page" in the Typeset menu to see the longest lines on the page. The card shows
 the counts and the ranges, in colour on colour screens. The page card has steppers for the margins and
 the text size, which measure the page again after each tap, and Cancel, Accept and Done buttons.]]),
-	version = "0.8.0",
+	version = "0.8.1",
 }

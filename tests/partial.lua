@@ -50,6 +50,12 @@ doc:enablePartialRerendering(true)
 ui.rolling.partial_rerendering = doc:isPartialRerenderingEnabled()
 check("partial rerendering is on", doc:isPartialRerenderingEnabled() == true)
 local conf = doc.configurable
+-- VIEW_MODE=scroll runs the whole test in continuous (scroll) view, where the reader paints the page differently
+if os.getenv("VIEW_MODE") then
+    ui:handleEvent(Event:new("SetViewMode", os.getenv("VIEW_MODE")))
+    UIManager:forceRePaint()
+    check("the view mode is " .. os.getenv("VIEW_MODE"), ui.view.view_mode == os.getenv("VIEW_MODE"), ui.view.view_mode)
+end
 
 local LineLength = dofile(PLUGIN .. "/main.lua")
 local plugin = LineLength:new{ document = doc, ui = ui }
@@ -166,14 +172,24 @@ local truth_final = settled()
 local card3 = openCard()
 check("and reopening shows the page as it is", card3.report.chars == truth_final, card3.report.chars .. " vs " .. truth_final)
 
--- ---- 6. the drawing is bounded: a tap draws the page a few times, not without end
-local calls = 0
-local real_force = UIManager.forceRePaint
-UIManager.forceRePaint = function(...) calls = calls + 1; return real_force(...) end
-local n_before = calls
+-- ---- 6. settling puts nothing on the screen: the reader's own paint runs a few times (not without end), into a buffer of
+-- its own, and no repaint is forced or run (every one of those would be a refresh of the panel)
+local paints, forced, repaints_run = 0, 0, 0
+local seen_buffers, buffer_count = {}, 0
+local real_paint, real_force, real_repaint = ui.view.paintTo, UIManager.forceRePaint, UIManager._repaint
+ui.view.paintTo = function(self, bb, x, y)
+    paints = paints + 1
+    if not seen_buffers[bb] then seen_buffers[bb] = true; buffer_count = buffer_count + 1 end
+    return real_paint(self, bb, x, y)
+end
+UIManager.forceRePaint = function(...) forced = forced + 1; return real_force(...) end
+UIManager._repaint = function(...) repaints_run = repaints_run + 1; return real_repaint(...) end
 plugin:onControl(card3, {}, "margins_more")
-UIManager.forceRePaint = real_force
-check("one change draws the page at most 3 times for the measurement", calls >= 1 and calls <= 3, calls)
+ui.view.paintTo, UIManager.forceRePaint, UIManager._repaint = real_paint, real_force, real_repaint
+check("one change: the reader paints the page 1 to 3 times for the measurement", paints >= 1 and paints <= 3, paints)
+check("all of them into one buffer", buffer_count == 1, buffer_count)
+check("and that buffer is not the screen's", next(seen_buffers) ~= Screen.bb)
+check("nothing was forced onto the screen, and no repaint ran", forced == 0 and repaints_run == 0, forced .. " forced, " .. repaints_run .. " run")
 Screen:shot((os.getenv("SHOT_DIR") or ".") .. "/partial_1_after_steps.png")
 UIManager:close(card3)
 UIManager:forceRePaint()

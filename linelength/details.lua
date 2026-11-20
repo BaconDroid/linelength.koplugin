@@ -55,6 +55,9 @@ local STEPPERS = {
 -- of the card, so the two look the same.
 local ACTIONS_GAP = 16
 
+-- How much of the width of the screen the card takes: a bit more in landscape, where it has two columns.
+local PORTRAIT_WIDTH, LANDSCAPE_WIDTH = 0.8, 0.9
+
 -- The buttons that change the layout: a tap on one of them shrinks the card.
 local STEPS = { margins_less = true, margins_more = true, text_less = true, text_more = true }
 
@@ -92,8 +95,13 @@ function Details:build()
     local compact = self.compact and self.controls ~= nil
     local border = Size.border.window
     local padding = Screen:scaleBySize(18)
-    local card_width = math.floor(Screen:getWidth() * 0.8)
+    -- On a screen that is wider than tall the card is wider too and its content goes in two columns, so that the card is
+    -- wider than tall itself and fits on the screen (in one column it is taller than a landscape screen).
+    local landscape = Screen:getWidth() > Screen:getHeight()
+    local card_width = math.floor(Screen:getWidth() * (landscape and LANDSCAPE_WIDTH or PORTRAIT_WIDTH))
     local width = card_width - 2 * (border + padding) -- width of the content inside the card
+    local column_gap = Screen:scaleBySize(28)
+    local column_width = math.floor((width - column_gap) / 2)
 
     local title_face = Font:getFace("tfont", 24)
     local big_face = Font:getFace("tfont", 60)
@@ -118,48 +126,52 @@ function Details:build()
         return Blitbuffer.ColorRGB32(r, g, b, 0xFF)
     end
 
-    local function centered(text, face, fgcolor)
-        local widget = TextWidget:new{ text = text, face = face, fgcolor = fgcolor, max_width = width }
-        return CenterContainer:new{ dimen = Geom:new{ w = width, h = widget:getSize().h }, widget }
+    local function centered(text, face, fgcolor, w)
+        w = w or width
+        local widget = TextWidget:new{ text = text, face = face, fgcolor = fgcolor, max_width = w }
+        return CenterContainer:new{ dimen = Geom:new{ w = w, h = widget:getSize().h }, widget }
     end
 
     -- two widgets side by side: one against the left edge, one against the right
-    local function sideBySide(left, right)
+    local function sideBySide(left, right, w)
+        w = w or width
         local height = math.max(left:getSize().h, right:getSize().h)
-        local dimen = Geom:new{ w = width, h = height }
+        local dimen = Geom:new{ w = w, h = height }
         return OverlapGroup:new{
             dimen = dimen,
-            LeftContainer:new{ dimen = Geom:new{ w = width, h = height }, left },
-            RightContainer:new{ dimen = Geom:new{ w = width, h = height }, right },
+            LeftContainer:new{ dimen = Geom:new{ w = w, h = height }, left },
+            RightContainer:new{ dimen = Geom:new{ w = w, h = height }, right },
         }
     end
 
     -- label on the left, value on the right; a long label is cut so it never runs into the value
-    local function row(left_text, right_text, left_face, right_face, left_color, right_color)
+    local function row(left_text, right_text, left_face, right_face, left_color, right_color, w)
+        w = w or width
         local right = TextWidget:new{ text = right_text, face = right_face, fgcolor = right_color }
         local left = TextWidget:new{
             text = left_text, face = left_face, fgcolor = left_color,
-            max_width = width - right:getSize().w - Screen:scaleBySize(16),
+            max_width = w - right:getSize().w - Screen:scaleBySize(16),
         }
-        return sideBySide(left, right)
+        return sideBySide(left, right, w)
     end
 
     -- One of the longest lines of a page: "L5:" (its number from the top of the page), the start of its
     -- text, and its length on the right. `label_width` is the widest label, so the texts line up.
-    local function listRow(line, label_width)
+    local function listRow(line, label_width, w)
+        w = w or width
         local gap_width = Screen:scaleBySize(10)
         local label = TextWidget:new{ text = line.number and string.format("L%d:", line.number) or "", face = list_bold_face }
         local right = TextWidget:new{ text = string.format("%d", line.chars), face = list_bold_face }
         local text = TextWidget:new{
             text = line.snippet, face = list_face,
-            max_width = width - label_width - gap_width - right:getSize().w - Screen:scaleBySize(16),
+            max_width = w - label_width - gap_width - right:getSize().w - Screen:scaleBySize(16),
         }
         return sideBySide(HorizontalGroup:new{
             align = "center",
             label,
             HorizontalSpan:new{ width = label_width - label:getSize().w + gap_width },
             text,
-        }, right)
+        }, right, w)
     end
 
     local function labelWidth(lines)
@@ -174,10 +186,10 @@ function Details:build()
         return widest
     end
 
-    local function divider()
+    local function divider(w)
         return LineWidget:new{
             background = Blitbuffer.COLOR_GRAY,
-            dimen = Geom:new{ w = width, h = Size.line.medium },
+            dimen = Geom:new{ w = w or width, h = Size.line.medium },
         }
     end
 
@@ -208,7 +220,7 @@ function Details:build()
     end
 
     -- "Margins        [ − ]  10  [ + ]": the label on the left, the stepper on the right
-    local function stepper(step)
+    local function stepper(step, w)
         local step_height = Screen:scaleBySize(48) -- Material's 48dp, Apple's 44pt: a finger-sized target
         local button_width = Screen:scaleBySize(62)
         local value_width = Screen:scaleBySize(64)
@@ -219,7 +231,7 @@ function Details:build()
             CenterContainer:new{ dimen = Geom:new{ w = value_width, h = step_height }, value },
             button(step.more, "+", button_width, step_height, { font_size = 28, bold = true }),
         }
-        return sideBySide(TextWidget:new{ text = step.label, face = row_bold_face }, group)
+        return sideBySide(TextWidget:new{ text = step.label, face = row_bold_face }, group, w)
     end
 
     -- Cancel on the left and the confirming action on the right, as in KOReader's dialogs. Full size: Done closes the
@@ -239,6 +251,66 @@ function Details:build()
 
     local tier_color = color(report.tier.color)
 
+    -- The parts the card is made of, each for the width it is laid out in (the whole content, or one column).
+    local function append(list, items)
+        for _i, item in ipairs(items) do
+            table.insert(list, item)
+        end
+    end
+    -- the number, what it counts and the verdict
+    local function scoreBlock(w)
+        return {
+            centered(string.format("%d", report.chars), big_face, tier_color, w),
+            centered(report.lines and _("characters in the longest line") or _("characters"), small_face, nil, w),
+            gap(4),
+            centered(report.tier.label, verdict_face, tier_color, w),
+        }
+    end
+    -- the longest lines of a whole page (say what the rows are, in bold, then each line with its number on the page and
+    -- the start of its text), or the counts of a selection
+    local function detailsBlock(w)
+        local items = {}
+        if report.lines then
+            table.insert(items, centered(#report.lines == 1 and _("Longest line on this page:") or _("Longest lines on this page:"), heading_face, nil, w))
+            table.insert(items, gap(4))
+            local label_width = labelWidth(report.lines)
+            for _i, line in ipairs(report.lines) do
+                table.insert(items, listRow(line, label_width, w))
+            end
+        else
+            table.insert(items, row(_("With spaces"), string.format("%d", report.chars), row_face, row_bold_face, nil, nil, w))
+            table.insert(items, row(_("Without spaces"), string.format("%d", report.chars_no_spaces), row_face, row_bold_face, nil, nil, w))
+            table.insert(items, row(_("Words"), string.format("%d", report.words), row_face, row_bold_face, nil, nil, w))
+        end
+        return items
+    end
+    -- the ranges, the one the page is in marked
+    local function bandsBlock(w)
+        local items = {}
+        for _i, band in ipairs(report.bands) do
+            local face = band.current and row_bold_face or row_face
+            local band_color = color(band.color)
+            table.insert(items, row((band.current and "● " or "○ ") .. band.label, band.range, face, face, band_color, band_color, w))
+        end
+        return items
+    end
+    -- the steppers that change the margins and the text size
+    local function steppersBlock(w)
+        local items = {}
+        for index, step in ipairs(STEPPERS) do
+            if index > 1 then
+                table.insert(items, gap(5))
+            end
+            table.insert(items, stepper(step, w))
+        end
+        return items
+    end
+    local function stack(items)
+        local group = VerticalGroup:new{ align = "center" }
+        append(group, items)
+        return group
+    end
+
     local content = VerticalGroup:new{ align = "center" }
     -- the title, a line under it, and the X that closes the card in the top right corner
     self.titlebar = TitleBar:new{
@@ -252,53 +324,77 @@ function Details:build()
     }
     table.insert(content, self.titlebar)
     table.insert(content, gap(6))
-    table.insert(content, centered(string.format("%d", report.chars), big_face, tier_color))
-    table.insert(content, centered(report.lines and _("characters in the longest line") or _("characters"), small_face))
-    table.insert(content, gap(4))
-    table.insert(content, centered(report.tier.label, verdict_face, tier_color))
-    table.insert(content, gap(6))
-    table.insert(content, divider())
-    table.insert(content, gap(5))
-    if not compact then
-        if report.lines then
-            -- a whole page: say what the rows are (in bold), then the longest lines, each with its number
-            -- on the page and the start of its text
-            table.insert(content, centered(#report.lines == 1 and _("Longest line on this page:") or _("Longest lines on this page:"), heading_face))
-            table.insert(content, gap(4))
-            local label_width = labelWidth(report.lines)
-            for _i, line in ipairs(report.lines) do
-                table.insert(content, listRow(line, label_width))
-            end
-        else
-            table.insert(content, row(_("With spaces"), string.format("%d", report.chars), row_face, row_bold_face))
-            table.insert(content, row(_("Without spaces"), string.format("%d", report.chars_no_spaces), row_face, row_bold_face))
-            table.insert(content, row(_("Words"), string.format("%d", report.words), row_face, row_bold_face))
-        end
-        table.insert(content, gap(5))
+
+    if not landscape then
+        -- one column
+        append(content, scoreBlock())
+        table.insert(content, gap(6))
         table.insert(content, divider())
         table.insert(content, gap(5))
-        for _i, band in ipairs(report.bands) do
-            local face = band.current and row_bold_face or row_face
-            local band_color = color(band.color)
-            table.insert(content, row((band.current and "● " or "○ ") .. band.label, band.range, face, face, band_color, band_color))
-        end
-    end
-
-    -- the controls that change the margins and the text size, when the card has them
-    if self.controls then
         if not compact then
+            append(content, detailsBlock())
             table.insert(content, gap(5))
             table.insert(content, divider())
+            table.insert(content, gap(5))
+            append(content, bandsBlock())
         end
-        table.insert(content, gap(6))
-        for index, step in ipairs(STEPPERS) do
-            if index > 1 then
+        -- the controls that change the margins and the text size, when the card has them
+        if self.controls then
+            if not compact then
                 table.insert(content, gap(5))
+                table.insert(content, divider())
             end
-            table.insert(content, stepper(step))
+            table.insert(content, gap(6))
+            append(content, steppersBlock())
+            table.insert(content, gap(ACTIONS_GAP))
+            table.insert(content, actions())
         end
-        table.insert(content, gap(ACTIONS_GAP))
-        table.insert(content, actions())
+    else
+        -- two columns. With the controls: the score and the ranges on the left, the longest lines and the steppers on the
+        -- right. Without them: the score on the left, everything else on the right.
+        local left, right = {}, {}
+        local flex -- where the right column takes up spare height: above the steppers, so that they stay at the bottom
+        append(left, scoreBlock(column_width))
+        if self.controls then
+            if not compact then
+                append(left, { gap(6), divider(column_width), gap(5) })
+                append(left, bandsBlock(column_width))
+                append(right, detailsBlock(column_width))
+                append(right, { gap(5), divider(column_width) })
+            end
+            flex = #right + 1
+            table.insert(right, gap(6))
+            append(right, steppersBlock(column_width))
+        else
+            append(right, detailsBlock(column_width))
+            append(right, { gap(5), divider(column_width), gap(5) })
+            append(right, bandsBlock(column_width))
+        end
+        -- the columns are the same height, so the steppers (and everything above the buttons) are at the same place
+        -- whether the card is full or shrunk
+        local left_height, right_height = stack(left):getSize().h, stack(right):getSize().h
+        if left_height < right_height then
+            local spare = right_height - left_height
+            if self.controls then
+                table.insert(left, VerticalSpan:new{ width = spare })
+            else
+                -- the score alone is centred against the other column
+                table.insert(left, 1, VerticalSpan:new{ width = math.floor(spare / 2) })
+                table.insert(left, VerticalSpan:new{ width = spare - math.floor(spare / 2) })
+            end
+        elseif right_height < left_height then
+            table.insert(right, flex or (#right + 1), VerticalSpan:new{ width = left_height - right_height })
+        end
+        table.insert(content, HorizontalGroup:new{
+            align = "top",
+            stack(left),
+            HorizontalSpan:new{ width = column_gap },
+            stack(right),
+        })
+        if self.controls then
+            table.insert(content, gap(ACTIONS_GAP))
+            table.insert(content, actions())
+        end
     end
 
     self.frame = FrameContainer:new{
@@ -343,12 +439,13 @@ function Details:press(id)
         return
     end
     if id == "accept" then
-        self.expand_on_update = true
+        -- nothing changes in the book on Accept, so the page behind the card stays as it is: only the card is refreshed
+        self.expand_on_update, self.card_only_refresh = true, true
         local ok, err = true, nil
         if self.on_control then
             ok, err = pcall(self.on_control, "accept")
         end
-        self.expand_on_update = false
+        self.expand_on_update, self.card_only_refresh = false, false
         self:expand() -- also when the plugin could not measure: Accept always shows the full card
         if not ok then
             error(err, 0)
@@ -378,17 +475,21 @@ function Details:expand()
     end
     self.compact = false
     self:build()
-    self:refresh()
+    self:refresh(true) -- only called when nothing changed in the book (Accept): the page behind the card is as it was
 end
 
--- Asks the screen to redraw the whole thing: the page behind the card has changed too.
-function Details:refresh()
+-- Asks the screen to redraw: the whole screen when the page behind the card has changed too (a step, a Cancel on the
+-- shrunk card), or only the card when it has not (Accept). A refresh of the panel is what blinks on a colour
+-- Kobo, and the area that blinks is the area that is refreshed. The region is read when the refresh is made, after the
+-- card has been painted (that is where the frame knows its place); without one the whole screen is refreshed.
+function Details:refresh(card_only)
     local use_color = self.use_color
     UIManager:setDirty("all", function()
+        local region = card_only and self.frame and self.frame.dimen or nil
         if use_color then
-            return "partial", nil, true
+            return "partial", region, true
         end
-        return "ui"
+        return "ui", region
     end)
 end
 
@@ -409,7 +510,7 @@ function Details:update(report, controls, values)
         self.compact = false
     end
     self:build()
-    self:refresh()
+    self:refresh(self.card_only_refresh)
 end
 
 function Details:onShow()
