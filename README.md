@@ -7,7 +7,9 @@ Two ways to check how long the lines of a book are, and whether that is a good l
 - **A line you select.** Select one line of text and the highlight dialog tells you how many characters it
   holds and how that reads. Tap the button for the details.
 - **The whole page.** *Line length: this page* in the Typeset menu lists the longest lines on the page you
-  are looking at, rated by the longest. No selection, and no highlight dialog needed.
+  are looking at, rated by the longest. No selection, and no highlight dialog needed. The card also has
+  steppers for the margins and the text size, and measures the page again after each change, so you
+  can adjust until the longest line reads Excellent, then keep it or put everything back with Cancel.
 
 | <img src="docs/selection-dialog.png" width="400" alt="The selection dialog in KOReader with an extra last button reading Line: 56 chars, Excellent"> | <img src="docs/details-card.png" width="400" alt="The details card: 56 characters, Excellent, counts with and without spaces, words, and the four ranges"> |
 |:---:|:---:|
@@ -15,7 +17,9 @@ Two ways to check how long the lines of a book are, and whether that is a good l
 | <img src="docs/menu-item.png" width="400" alt="KOReader's Typeset menu with the last item, Line length: this page, highlighted"> | <img src="docs/page-card.png" width="400" alt="The page card: 59 characters in the longest line, Excellent, the three longest lines L11, L7 and L12 with 59, 58 and 56 characters, and the four ranges"> |
 | *The whole-page mode starts from the Typeset menu: the last item, Line length: this page.* | *The card for the whole page: the longest line has 59 characters (Excellent). Under it are the three longest lines, each with its place on the page (L11 is the eleventh line) and its length, then the four ranges. The X in the corner closes it.* |
 
-Screenshots from a Kobo Libra Colour running KOReader v2026.07.2.
+Screenshots from a Kobo Libra Colour running KOReader v2026.07.2. The card screenshot is from version 0.7.0, before
+the margin and text size controls were added under the four ranges; see
+[Changing the margins and the text size from the card](#changing-the-margins-and-the-text-size-from-the-card).
 
 ## Requirements
 
@@ -52,7 +56,49 @@ characters, so check two or three.
    *Longest lines on this page:* are the three longest lines, each as `L5: start of the text … 54`: `L5` is
    that line's place on the page, counted from the top (the fifth line), then the start of its text, then
    its length in characters.
-3. Tap the X in the top right corner, or anywhere, to close it.
+3. Tap the X in the top right corner to close it. Tapping outside the card closes it too.
+
+#### Changing the margins and the text size from the card
+
+Under the ranges the card has two steppers, **Margins** and **Text size**, each with a **−** and a **+** around
+the current value, and two buttons: **Cancel** and **Done**.
+
+- A **+** makes the lines **shorter** (wider margins, bigger text) and a **−** makes them **longer**. If the
+  longest line is too long, tap **+** on Margins or on Text size.
+- The number between the buttons is the setting as KOReader's own Typeset menu shows it (margins 10, text size
+  22), so you can see what you have set and set it again by hand.
+- Each tap changes the width of the text by about 5%, which is about 3 characters on a line of 60. Smaller
+  steps would not show: lines break at whole words, so the longest line only moves when the width moves by a
+  few percent.
+- **The card shrinks while you adjust.** A tap on a stepper drops everything but the title, the number, the
+  verdict and the controls, so the page behind it shows and you can watch it change. It stays small for as long
+  as you like. The bottom edge stays where it was, so the buttons do not move under your
+  finger. The two buttons at the bottom change with it:
+  - **Accept** keeps what you changed, measures the page again, and shows the full card with the new numbers.
+  - **Cancel** puts the margins and the text size back to what they were when you opened the card, and shows the
+    full card again. That includes changes you accepted earlier.
+- On the full card, **Done** closes it and keeps what you changed; **Cancel** puts everything back to what it was
+  when you opened the card, and closes it. The X and a tap outside the card close it and keep what you changed.
+- After each tap the book is laid out again, the page is measured again, and the card shows the new numbers.
+  The line numbers (`L5`) are those of the new layout.
+- KOReader renders only the chapter you are in when you change a setting, and only when it next draws the page
+  ("partial rerendering", on by default for books with several chapters). The plugin draws the page first and
+  measures it after, so the numbers are for the page as it is now, not for the one before your last tap. A tap can
+  take a little longer for that.
+- **Margins** are the left and right margins together; the top and bottom margins are not touched. They are
+  changed by the same amount on both sides, so margins that differ stay different (the stepper then shows
+  both, like `10/14`).
+- These are the same settings as in KOReader's Typeset menu, set the same way, so they apply to the book you
+  are reading and are saved with it.
+- A button that cannot go further is grey. KOReader's own limits apply: each margin from 0 to 140, the text
+  size from 12 to 255.
+- With the controls on the card, a tap that misses a button does nothing; only the X, **Done**, **Cancel** or a
+  tap outside the card closes it. The card of a selected line has no buttons and still closes on any tap.
+- Changing the margins or the text size lays the whole book out again, so page numbers change and a long book
+  can take a moment. The page you are on keeps its place in the text: after a change it can start a little
+  earlier or later, and Cancel brings it back to the same place.
+- The number is for one page. Dialogue, indents and headings have different line lengths, so a layout that
+  gives this page an Excellent line is a good start, not a guarantee for the whole book.
 
 The action is also in KOReader's gesture list as *Line length: this page*, so it can go on a tap zone, a
 corner or a profile.
@@ -140,8 +186,8 @@ because KOReader stores that id in the gesture settings.
 
 ## Tested on
 
-A Kobo Libra Colour (firmware 4.45) with KOReader v2026.07.2. The button, the card, the whole-page mode
-and the colours show on its screen.
+A Kobo Libra Colour (firmware 4.45) with KOReader v2026.07.2. The button, the card, the whole-page mode,
+the margin and text size controls (with Cancel, Accept and Done) and the colours show on its screen.
 
 ## How it works
 
@@ -156,7 +202,18 @@ and the colours show on its screen.
 - `linelength/counter.lua` counts and `linelength/rating.lua` holds the ranges. Neither uses KOReader, so both
   are tested on a desktop.
 - `linelength/report.lua` shapes the numbers for the card, and `linelength/details.lua` draws it from KOReader's
-  own widgets. If building the card fails, the same information is shown as plain text.
+  own widgets (its steppers and buttons are KOReader's `Button`). It shrinks to the controls when a stepper is
+  tapped and is full size again when Accept or Cancel is tapped; it never schedules anything. If building the
+  card fails, the same information is shown as plain text.
+- After a change, `main.lua` measures the page through `measureSettled`: when KOReader says the rendering is delayed
+  (`isRerenderingDelayed`) it draws the page with KOReader's own paint, which renders it, and measures again until
+  two measurements agree (three draws at most). Without that, the first measurement is of the old layout and the
+  card is one change behind. A fully rendered book is measured at once and nothing is drawn.
+- `linelength/layout.lua` works out one step of the margins or the text size, in the units KOReader's own
+  menus use. It does not use KOReader, so it is tested on a desktop. `main.lua` applies a step the way the
+  Typeset menu does: a `ConfigChange` event (which is what stores the value with the book) and then
+  `SetPageHorizMargins` or `SetFontSize`, sent to the reader. KOReader lays the book out again before the
+  call returns, so the page is measured again at once and the card is redrawn.
 - `linelength/colortext.lua` is a `TextWidget` that keeps the colour. KOReader's `TextWidget` blits glyphs
   through `getColor8A()`, which keeps only the brightness of a colour, so any text colour comes out grey.
   This widget draws the same glyphs with `colorblitFromRGB32` when the colour is not a grey, and
@@ -184,6 +241,21 @@ the header of the file says how to run it.
 `tests/plugin.lua` runs the real `main.lua`, the real engine and the real card together: it checks that the
 numbers on the card match the page's own lines, that the X is in the top right corner and its action closes
 the card, and that the action runs through KOReader's own gesture dispatcher.
+
+`tests/controls.lua` opens a real `ReaderUI` (KOReader's own font, typeset and footer modules) and sends real
+taps to the real buttons: the real margins and text size of the book must change, the card must show what the
+page now measures (checked against an independent measurement), the values must be stored with the book,
+Cancel must give back the margins, the text size, the number of pages and the page top to the
+character (also after an Accept), Done must keep the changes, a tap that misses a button must not close the card,
+and a tap outside it must. It also checks the shrinking: the card is smaller and shows only the title, the number,
+the verdict and the controls, every button is exactly where it was, it is still small after a pause of more than a
+second and the card has scheduled nothing, Accept and Cancel bring the full card back, and Cancel and Done close it
+when it is full size.
+
+`tests/partial.lua` does the same with a book that KOReader renders partially (several chapters, big enough for a
+cache; `tests/fixtures/make_epub_chapters.py` builds one): after every tap the card must show what the page holds
+once it has been drawn, and so must the full card after Accept and the card when it is opened again. Before the
+page was drawn first, every one of these taps showed the previous tap's numbers.
 
 `tests/render.lua` draws the button dialog and the cards with a desktop build of KOReader and saves
 PNGs at the size of a Libra Colour. It shows what the code draws into KOReader's buffer, not what a

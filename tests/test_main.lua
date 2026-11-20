@@ -4,7 +4,7 @@ package.path = "./?.lua;" .. package.path
 -- ---- stubs --------------------------------------------------------------------------------
 local shown, warns = {}, {}
 local color_state = { on = true } -- true, false, or "error" (isColorEnabled raises)
-local screen_state = { raises = false } -- true: asking for the screen size raises
+local screen_state = { raises = false, scale_raises = false } -- raises: asking for the screen size raises
 local details_opts = {}           -- what the card was asked to show
 local actions = {}                -- Dispatcher actions registered
 
@@ -27,10 +27,18 @@ package.preload["ui/widget/infomessage"] = function()
     function I:new(o) o.is_infomessage = true; return o end
     return I
 end
--- Only show(): the button no longer schedules or refreshes anything. Any leftover use of
--- tickAfterNext/nextTick/setDirty in main.lua would raise here.
+-- show() and forceRePaint() (which counts, and can run a hook: KOReader's paint is what renders a book that is only
+-- rendered when drawn). The button schedules and refreshes nothing: any leftover use of tickAfterNext/nextTick/setDirty
+-- in main.lua would raise here.
+local repaints = { n = 0, hook = nil }
 package.preload["ui/uimanager"] = function()
-    return { show = function(_self, w) shown[#shown + 1] = w end }
+    return {
+        show = function(_self, w) shown[#shown + 1] = w end,
+        forceRePaint = function()
+            repaints.n = repaints.n + 1
+            if repaints.hook then repaints.hook() end
+        end,
+    }
 end
 -- No ffi/blitbuffer stub on purpose: main.lua must not need it any more.
 package.preload["device"] = function()
@@ -44,7 +52,16 @@ package.preload["device"] = function()
             return 1264
         end,
         getHeight = function() return 1680 end,
+        -- 2 pixels per KOReader unit, so the screen is 632 units wide
+        scaleBySize = function(_self, n)
+            if screen_state.scale_raises then error("no scale") end
+            return n * 2
+        end,
     } }
+end
+-- KOReader's Event: a name and its arguments
+package.preload["ui/event"] = function()
+    return { new = function(_self, name, ...) return { name = name, args = { ... } } end }
 end
 package.preload["dispatcher"] = function()
     return { registerAction = function(_self, name, def) actions[name] = def end }
@@ -79,7 +96,13 @@ end
 local DetailsStub = {}
 function DetailsStub:new(o)
     details_opts[#details_opts + 1] = o
-    return { is_details = true, opts = o }
+    local card = { is_details = true, opts = o, report = o.report, updates = {} }
+    -- what the real card does when it is redrawn: it keeps the new report
+    function card:update(report, controls, values)
+        self.updates[#self.updates + 1] = { report = report, controls = controls, values = values }
+        self.report = report
+    end
+    return card
 end
 package.preload["linelength/details"] = function() return DetailsStub end
 
@@ -435,6 +458,570 @@ reset()
 tap(sample.selected_text.text)
 expect("selection button still shows the selection report", shown[1] and shown[1].opts.report.lines, nil)
 expect("selection report keeps its counts", shown[1] and shown[1].opts.report.chars, 18)
+expect("the selection card has no buttons for the margins", shown[1] and shown[1].opts.controls, nil)
+expect("and nothing to call for them", shown[1] and shown[1].opts.on_control, nil)
+
+-- ---------------------------------------------------------------------------------------------
+-- 11. the buttons on the page card: margins, text size, and Cancel (the plugin gets "cancel" from the full card and "revert" from the shrunk one).
+-- A fake reader: it stores a ConfigChange the way KOReader does and records every event it gets. The page it shows
+-- depends on the layout: the longest line has 70 + (10 - left margin) - 3 * (font size - 22) characters, the
+-- other two are 11 and 25 shorter. The screen is 632 units wide (1264 px, 2 px per unit).
+local function show(v)
+    if type(v) == "table" then
+        local parts = {}
+        for i, x in ipairs(v) do parts[i] = tostring(x) end
+        return table.concat(parts, ",")
+    end
+    return tostring(v)
+end
+local function layoutBook(conf, texts_for)
+    local doc = { configurable = conf, fail = false }
+    texts_for = texts_for or function(c)
+        local longest = 70 + (10 - c.h_page_margins[1]) - 3 * (c.font_size - 22)
+        return { ("w"):rep(longest - 11), ("b"):rep(longest), ("c"):rep(longest - 25) }
+    end
+    return setmetatable(doc, { __index = function(_t, key)
+        local d = fakeDoc(texts_for(doc.configurable), { raises = doc.fail })
+        local value = d[key]
+        if type(value) == "function" then
+            return function(_self, ...) return value(d, ...) end
+        end
+        return value
+    end })
+end
+local function layoutPlugin(conf, texts_for)
+    local doc = layoutBook(conf or { h_page_margins = { 10, 10 }, font_size = 22 }, texts_for)
+    local events = {}
+    local ui = { menu = newMenu(), highlight = newHighlight(), document = doc, rolling = {}, fail_event = false }
+    function ui:handleEvent(ev)
+        if self.fail_event then error("event boom") end
+        local parts = {}
+        for i, a in ipairs(ev.args) do parts[i] = show(a) end
+        events[#events + 1] = ev.name .. ":" .. table.concat(parts, ":")
+        if ev.name == "ConfigChange" then doc.configurable[ev.args[1]] = ev.args[2] end
+        return true
+    end
+    actions = {}
+    local p = makePlugin({ document = {}, ui = ui })
+    return p, ui, doc, events
+end
+-- the four stepper buttons as "1111": margins narrower, margins wider, text smaller, text bigger
+local function flags(c)
+    local s = {}
+    for i, id in ipairs({ "margins_less", "margins_more", "text_less", "text_more" }) do
+        s[i] = c[id] and "1" or "0"
+    end
+    return table.concat(s)
+end
+
+-- 11a. the card opens with the buttons, and a tap changes the layout, measures again, redraws
+reset()
+local lp, lui, ldoc, levents = layoutPlugin()
+lp:showPage()
+local lcard = shown[1]
+expect("page card: opened", lcard and lcard.is_details, true)
+expect("page card: starts with the longest line (70)", lcard.opts.report.chars, 70)
+-- from margins 10/10: wider -> 25/25, narrower -> 0/0 (10 - 15, held at 0); font 22 -> 21 or 23
+expect("page card: all four steps usable", flags(lcard.opts.controls), "1111")
+expect("page card: the controls have no undo", lcard.opts.controls.undo, nil)
+expect("page card: a function to call for the buttons", type(lcard.opts.on_control), "function")
+expect("page card: the steppers start at margins 10 and size 22", lcard.opts.values and (lcard.opts.values.margins .. "," .. lcard.opts.values.size), "10,22")
+
+-- margins wider. text = 632 - 20 = 612; 2.5% = 15.3 -> 15 each side -> 25/25
+lcard.opts.on_control("margins_more")
+expect("margins wider: the events, in KOReader's order", table.concat(levents, "|"),
+    "ConfigChange:h_page_margins:25,25|SetPageHorizMargins:25,25")
+expect("margins wider: stored with the book", show(ldoc.configurable.h_page_margins), "25,25")
+expect("margins wider: the card was redrawn once", #lcard.updates, 1)
+-- the page is laid out again: longest = 70 + (10 - 25) = 55
+expect("margins wider: measured again (55)", lcard.updates[1].report.chars, 55)
+expect("margins wider: 55 is Excellent", lcard.updates[1].report.tier.id, "excellent")
+expect("margins wider: the other two lines follow (44 and 30)", lcard.updates[1].report.lines[2].chars .. "," .. lcard.updates[1].report.lines[3].chars, "44,30")
+expect("margins wider: the longest is line 2 of the page", lcard.updates[1].report.lines[1].number, 2)
+expect("margins wider: all four steps still usable", flags(lcard.updates[1].controls), "1111")
+expect("margins wider: the steppers show 25 and 22", lcard.updates[1].values.margins .. "," .. lcard.updates[1].values.size, "25,22")
+
+-- text bigger: 22 -> 23 (5% of 22 is 1.1 -> 1); longest = 70 - 15 - 3 = 52
+local before = #levents
+lcard.opts.on_control("text_more")
+expect("text bigger: the events", table.concat(levents, "|", before + 1), "ConfigChange:font_size:23|SetFontSize:23")
+expect("text bigger: stored with the book", ldoc.configurable.font_size, 23)
+expect("text bigger: measured again (52)", lcard.updates[2].report.chars, 52)
+expect("text bigger: the steppers show 25 and 23", lcard.updates[2].values.margins .. "," .. lcard.updates[2].values.size, "25,23")
+
+-- margins narrower from 25/25: text = 632 - 50 = 582; 14.55 -> 15 -> back to 10/10; longest = 70 + 0 - 3 = 67
+before = #levents
+lcard.opts.on_control("margins_less")
+expect("margins narrower: the events", table.concat(levents, "|", before + 1), "ConfigChange:h_page_margins:10,10|SetPageHorizMargins:10,10")
+expect("margins narrower: measured again (67)", lcard.updates[3].report.chars, 67)
+expect("margins narrower: 67 is Comfortable", lcard.updates[3].report.tier.id, "comfortable")
+expect("margins narrower: the steppers show 10 and 23", lcard.updates[3].values.margins .. "," .. lcard.updates[3].values.size, "10,23")
+
+-- revert (Cancel on the shrunk card): how it was when the card opened is margins 10/10 and size 22. Only the size differs now (23).
+before = #levents
+lcard.opts.on_control("revert")
+expect("revert: only what differs is set (the size), nothing for the margins", table.concat(levents, "|", before + 1), "ConfigChange:font_size:22|SetFontSize:22")
+expect("revert: margins as at the start", show(ldoc.configurable.h_page_margins), "10,10")
+expect("revert: size as at the start", ldoc.configurable.font_size, 22)
+expect("revert: measured again, back to 70", lcard.updates[4].report.chars, 70)
+expect("revert: all four steps usable", flags(lcard.updates[4].controls), "1111")
+expect("revert: the steppers show 10 and 22 again", lcard.updates[4].values.margins .. "," .. lcard.updates[4].values.size, "10,22")
+expect("revert: eight events in all, no more", #levents, 8)
+
+-- 11b. revert after margins AND size changed: both are set back, margins first
+reset()
+local p2, _u2, d2, e2 = layoutPlugin()
+p2:showPage()
+local c2 = shown[1]
+c2.opts.on_control("margins_more")
+c2.opts.on_control("text_more")
+c2.opts.on_control("text_more") -- 23 -> 24 (5% of 23 is 1.15 -> 1)
+expect("two text steps: size 24", d2.configurable.font_size, 24)
+local n2 = #e2
+c2.opts.on_control("revert")
+expect("revert of everything: margins first, then the size", table.concat(e2, "|", n2 + 1),
+    "ConfigChange:h_page_margins:10,10|SetPageHorizMargins:10,10|ConfigChange:font_size:22|SetFontSize:22")
+expect("revert of everything: layout as at the start", show(d2.configurable.h_page_margins) .. "/" .. d2.configurable.font_size, "10,10/22")
+expect("revert of everything: card measured again (70)", c2.updates[#c2.updates].report.chars, 70)
+-- a second revert does nothing
+n2 = #e2
+local u2 = #c2.updates
+c2.opts.on_control("revert")
+expect("a second revert sets nothing", #e2, n2)
+expect("a second revert does not redraw", #c2.updates, u2)
+
+-- 11c. a change and its reverse by hand: revert then has nothing to set but still clears itself
+reset()
+local p3, _u3, d3, e3 = layoutPlugin()
+p3:showPage()
+local c3 = shown[1]
+c3.opts.on_control("text_more") -- 22 -> 23
+c3.opts.on_control("text_less") -- 23 -> 22 (5% of 23 is 1.15 -> 1)
+expect("by hand back to 22", d3.configurable.font_size, 22)
+n2 = #e3
+c3.opts.on_control("revert")
+expect("revert when the layout is already the original: no event", #e3, n2)
+expect("revert when the layout is already the original: card redrawn", #c3.updates, 3)
+expect("revert when the layout is already the original: all four steps usable", flags(c3.updates[3].controls), "1111")
+
+-- 11d. limits: margins 140/140 cannot go wider, size 255 cannot go bigger; nothing happens when they are tapped
+reset()
+local fixed = function() return { ("b"):rep(60) } end
+local p4, _u4, d4, e4 = layoutPlugin({ h_page_margins = { 140, 140 }, font_size = 255 }, fixed)
+p4:showPage()
+local c4 = shown[1]
+-- narrower from 140: text = 632 - 280 = 352; 8.8 -> 9 -> 131. text smaller from 255: 12.75 -> 13 -> 242.
+expect("limits: wider and bigger are off", flags(c4.opts.controls), "1010")
+c4.opts.on_control("margins_more")
+c4.opts.on_control("text_more")
+expect("limits: tapping them sets nothing", #e4, 0)
+expect("limits: and redraws nothing", #c4.updates, 0)
+c4.opts.on_control("margins_less")
+expect("limits: narrower from 140 -> 131", table.concat(e4, "|"), "ConfigChange:h_page_margins:131,131|SetPageHorizMargins:131,131")
+-- 131 -> text = 632 - 262 = 370; 9.25 -> 9; wider is possible again (to 140), narrower to 122
+expect("limits: after the step wider is possible again", flags(c4.updates[1].controls), "1110")
+
+-- 11e. nothing to revert yet, unknown buttons
+reset()
+local p5, _u5, _d5, e5 = layoutPlugin()
+p5:showPage()
+local c5 = shown[1]
+c5.opts.on_control("revert")
+c5.opts.on_control("undo") -- the old Undo button is gone: an unknown id
+c5.opts.on_control("no_such_button")
+c5.opts.on_control(nil)
+expect("revert with nothing changed sets nothing", #e5, 0)
+expect("unknown buttons set nothing", #c5.updates, 0)
+
+-- 11f. when the layout is not known there are no buttons at all
+for label, conf in pairs({
+    ["no configurable at all"] = false,
+    ["no margins"] = { font_size = 22 },
+    ["no font size"] = { h_page_margins = { 10, 10 } },
+    ["margins with one side"] = { h_page_margins = { 10 }, font_size = 22 },
+    ["margins as text"] = { h_page_margins = { "10", "10" }, font_size = 22 },
+    ["font size as text"] = { h_page_margins = { 10, 10 }, font_size = "22" },
+}) do
+    reset()
+    local doc
+    if conf then
+        -- a fixed page: only the layout values are incomplete
+        doc = layoutBook(conf, function() return { L1, L2, L3 } end)
+    else
+        doc = fakeDoc({ L1, L2, L3 }) -- no `configurable` at all
+    end
+    local pl = pagePlugin(doc)
+    pl:showPage()
+    expect("unknown layout (" .. label .. "): the card still opens", shown[1] and shown[1].is_details, true)
+    expect("unknown layout (" .. label .. "): no buttons", shown[1] and shown[1].opts.controls, nil)
+    expect("unknown layout (" .. label .. "): nothing to call", shown[1] and shown[1].opts.on_control, nil)
+    expect("unknown layout (" .. label .. "): no steppers to fill", shown[1] and shown[1].opts.values, nil)
+end
+reset()
+screen_state.scale_raises = true
+local pl6 = layoutPlugin()
+pl6:showPage()
+expect("the screen scale cannot be read: the card opens without buttons", shown[1] and shown[1].is_details and shown[1].opts.controls == nil, true)
+screen_state.scale_raises = false
+
+-- 11g. a failure while changing: logged, KOReader goes on, revert (Cancel on the shrunk card) is there
+reset()
+local p7, u7, d7, e7 = layoutPlugin()
+p7:showPage()
+local c7 = shown[1]
+u7.fail_event = true
+c7.opts.on_control("margins_more")
+expect("an event that fails: one warning", #warns, 1)
+expect("an event that fails: nothing redrawn", #c7.updates, 0)
+expect("an event that fails: nothing was stored", show(d7.configurable.h_page_margins), "10,10")
+u7.fail_event = false
+c7.opts.on_control("revert")
+expect("after the failure revert is there: the card is redrawn", #c7.updates, 1)
+expect("after the failure revert is there: all four steps usable", flags(c7.updates[1].controls), "1111")
+expect("after the failure nothing was set that was not different", #e7, 0)
+
+-- 11h. the engine cannot read the page after the change: the old numbers stay, the buttons still update
+reset()
+local p8, _u8, d8 = layoutPlugin()
+p8:showPage()
+local c8 = shown[1]
+d8.fail = true
+c8.opts.on_control("margins_more")
+expect("engine fails after the change: the layout did change", show(d8.configurable.h_page_margins), "25,25")
+expect("engine fails after the change: card redrawn once", #c8.updates, 1)
+expect("engine fails after the change: the old report is kept (70)", c8.updates[1].report.chars, 70)
+expect("engine fails after the change: the buttons still update", flags(c8.updates[1].controls), "1111")
+
+-- 11i. the card does not get buttons in a book it cannot measure
+reset()
+local p9 = pagePlugin(fakeDoc({ L1 }), { rolling = false })
+p9.ui.rolling = nil
+p9:showPage()
+expect("a book that does not reflow: no card at all", shown[1] and shown[1].is_infomessage, true)
+
+-- 11j. reading the page raises after the change (here KOReader's clean-up of the text does): the layout did
+-- change, so it is logged, the old numbers stay on the card, and the buttons still update
+reset()
+local p10, _u10, d10 = layoutPlugin()
+p10:showPage()
+local c10 = shown[1]
+local util_module = require("util")
+local real_clean = util_module.cleanupSelectedText
+util_module.cleanupSelectedText = function() error("clean boom") end
+c10.opts.on_control("margins_more")
+util_module.cleanupSelectedText = real_clean
+expect("a measurement that raises: the layout did change", show(d10.configurable.h_page_margins), "25,25")
+expect("a measurement that raises: one warning", #warns, 1)
+expect("a measurement that raises: the warning says what failed", warns[1] and tostring(warns[1][1]), "linelength: could not read the lines of this page:")
+expect("a measurement that raises: the card is redrawn once", #c10.updates, 1)
+expect("a measurement that raises: with the old numbers (70)", c10.updates[1].report.chars, 70)
+expect("a measurement that raises: the buttons still update", flags(c10.updates[1].controls), "1111")
+
+-- 11k. currentLayout never raises: it says nil when KOReader does not tell the layout
+for label, conf in pairs({ ["none"] = false, ["no margins"] = { font_size = 22 }, ["margins as text"] = { h_page_margins = { "1", "2" }, font_size = 22 } }) do
+    local pl = pagePlugin(conf and layoutBook(conf, function() return { L1 } end) or fakeDoc({ L1 }))
+    local ok_layout, layout = pcall(pl.currentLayout, pl)
+    expect("currentLayout (" .. label .. ") does not raise", ok_layout, true)
+    expect("currentLayout (" .. label .. ") is nil", layout, nil)
+end
+local pl_ok = layoutPlugin()
+local good_layout = pl_ok:currentLayout()
+expect("currentLayout reads the margins", good_layout and good_layout.margins[1] .. "," .. good_layout.margins[2], "10,10")
+expect("currentLayout reads the size", good_layout and good_layout.size, 22)
+
+-- 11k2. Nothing in the tests above drew the page: the books there are rendered when the layout changes
+expect("no page was drawn by the tests that use a fully rendered book", repaints.n, 0)
+
+-- 11n. A book that KOReader renders only when it next DRAWS it (partial rerendering, on by default for EPUBs with
+-- several chapters): right after a change the lines are still the old layout, and the first measurement is one change
+-- behind. The plugin draws the page (KOReader's paint renders it) and measures again until two measurements agree.
+-- Here `rendered` is the layout the page was last drawn with; the paint brings it up to date.
+local function layoutTexts(c)
+    local longest = 70 + (10 - c.h_page_margins[1]) - 3 * (c.font_size - 22)
+    return { ("w"):rep(longest - 11), ("b"):rep(longest), ("c"):rep(longest - 25) }
+end
+local function copyLayout(c) return { h_page_margins = { c.h_page_margins[1], c.h_page_margins[2] }, font_size = c.font_size } end
+local function delayedPlugin(delayed, texts_for)
+    local conf = { h_page_margins = { 10, 10 }, font_size = 22 }
+    local rendered = copyLayout(conf)
+    texts_for = texts_for or layoutTexts
+    -- a book that is rendered when drawn shows the layout it was last drawn with; a fully rendered one shows the new one at once
+    local doc = layoutBook(conf, function() return texts_for(delayed and rendered or conf) end)
+    rawset(doc, "isRerenderingDelayed", function() return delayed end)
+    repaints.n, repaints.hook = 0, function() rendered.h_page_margins, rendered.font_size = { conf.h_page_margins[1], conf.h_page_margins[2] }, conf.font_size end
+    local events = {}
+    local ui = { menu = newMenu(), highlight = newHighlight(), document = doc, rolling = {} }
+    function ui:handleEvent(ev)
+        local parts = {}
+        for i, a in ipairs(ev.args) do parts[i] = show(a) end
+        events[#events + 1] = ev.name .. ":" .. table.concat(parts, ":")
+        if ev.name == "ConfigChange" then conf[ev.args[1]] = ev.args[2] end
+        return true
+    end
+    actions = {}
+    return makePlugin({ document = {}, ui = ui }), doc, rendered, events, conf
+end
+
+reset()
+local dp, ddoc, drendered, devents = delayedPlugin(true)
+dp:showPage()
+local dcard = shown[1]
+expect("delayed: the card opens with the page as drawn (70)", dcard.opts.report.chars, 70)
+expect("delayed: opening the card draws nothing", repaints.n, 0)
+dcard.opts.on_control("margins_more") -- 10 -> 25: longest 55 once drawn; until then still 70
+expect("delayed: the card shows the NEW layout (55), not the old one (70)", dcard.updates[1].report.chars, 55)
+expect("delayed: the other two lines are the new layout's too (44 and 30)", dcard.updates[1].report.lines[2].chars .. "," .. dcard.updates[1].report.lines[3].chars, "44,30")
+expect("delayed: the page was drawn twice (the first measurement was stale, the second agreed with the third)", repaints.n, 2)
+expect("delayed: one redraw of the card", #dcard.updates, 1)
+dcard.opts.on_control("text_more") -- 22 -> 23: 55 - 3 = 52
+expect("delayed: the next step is right too (52), not one behind (55)", dcard.updates[2].report.chars, 52)
+expect("delayed: two more draws for it", repaints.n, 4)
+dcard.opts.on_control("margins_less") -- 25 -> 10: 70 - 3 = 67
+expect("delayed: and the next (67)", dcard.updates[3].report.chars, 67)
+expect("delayed: 67 is Comfortable", dcard.updates[3].report.tier.id, "comfortable")
+
+-- Accept measures again. Something changed under the card (the page as drawn is now another one): the full card has to show it
+local before_accept, repaints_before = #dcard.updates, repaints.n
+ddoc.configurable.font_size = 24; drendered.font_size = 24 -- 70 - 6 = 64 with margins 10
+local events_before = #devents
+dcard.opts.on_control("accept")
+expect("accept: the card is redrawn once", #dcard.updates, before_accept + 1)
+expect("accept: with what the page holds now (64), not what it held at the last step (67)", dcard.updates[#dcard.updates].report.chars, 64)
+expect("accept: the buttons and steppers are given too", dcard.updates[#dcard.updates].values.size .. "," .. flags(dcard.updates[#dcard.updates].controls), "24,1111")
+expect("accept: it changes nothing in the book", #devents, events_before)
+expect("accept: a book that is rendered when drawn gets its page drawn first", repaints.n > repaints_before, true)
+
+-- not delayed: nothing is drawn, the change is already in the lines
+reset()
+local np, _ndoc, _nr, nevents = delayedPlugin(false)
+np:showPage()
+local ncard = shown[1]
+ncard.opts.on_control("margins_more")
+expect("not delayed: the card shows the new layout (55)", ncard.updates[1].report.chars, 55)
+expect("not delayed: the page is not drawn by the plugin", repaints.n, 0)
+ncard.opts.on_control("accept")
+expect("not delayed: accept measures again too (55)", ncard.updates[2].report.chars, 55)
+expect("not delayed: and draws nothing", repaints.n, 0)
+
+-- asking KOReader whether the rendering is delayed fails: treated as not delayed, the card still updates
+reset()
+local fp, fdoc = delayedPlugin(true)
+rawset(fdoc, "isRerenderingDelayed", function() error("no such thing") end)
+fp:showPage()
+local fcard = shown[1]
+fcard.opts.on_control("margins_more")
+expect("delayed? raises: the card is still redrawn", #fcard.updates, 1)
+expect("delayed? raises: nothing is drawn", repaints.n, 0)
+expect("delayed? raises: no warning (it is a question, not a failure)", #warns, 0)
+
+-- a page that never holds still (every draw changes it): bounded, 3 draws, the last measurement is shown
+reset()
+local sp, sdoc, srendered = delayedPlugin(true)
+sp:showPage()
+local scard = shown[1]
+local flip = 0
+repaints.hook = function() flip = flip + 1; srendered.font_size = 22 + flip end -- another size every draw
+scard.opts.on_control("margins_more")
+expect("never settles: stops after 3 draws", repaints.n, 3)
+expect("never settles: the card is redrawn once, with the last measurement (font 25 -> 70 - 10 - 9 = 51 with margins 25)", scard.updates[1].report.chars, 70 + (10 - 10) - 3 * (25 - 22))
+expect("never settles: one redraw", #scard.updates, 1)
+
+-- the longest line stays the same but the other lines move: that is not settled yet (the lines are compared, not
+-- just the longest)
+reset()
+local lp2 = delayedPlugin(true, function(c)
+    if c.font_size == 22 then return { ("w"):rep(59), ("b"):rep(70), ("c"):rep(45) } end
+    return { ("w"):rep(65), ("b"):rep(70), ("c"):rep(40) }
+end)
+lp2:showPage()
+local lcard2 = shown[1]
+expect("same longest line: the card opens with the lines as drawn (59 and 45 behind the 70)", lcard2.opts.report.lines[2].chars .. "," .. lcard2.opts.report.lines[3].chars, "59,45")
+lcard2.opts.on_control("text_more")
+expect("same longest line, other lines move: the card shows the settled lines (65 and 40)", lcard2.updates[1].report.lines[2].chars .. "," .. lcard2.updates[1].report.lines[3].chars, "65,40")
+expect("same longest line, other lines move: so a second draw was needed to see it hold", repaints.n, 2)
+-- the same lines but in other places (the page moved by a line): not settled either
+reset()
+local lp3, _d3, r3 = delayedPlugin(true, function(c)
+    if c.font_size == 22 then return { ("w"):rep(59), ("b"):rep(70), ("c"):rep(45) } end
+    return { ("c"):rep(45), ("w"):rep(59), ("b"):rep(70) }
+end)
+lp3:showPage()
+local lcard3 = shown[1]
+expect("same lengths in other places: before, the longest is line 2", lcard3.opts.report.lines[1].number, 2)
+lcard3.opts.on_control("text_more")
+expect("same lengths in other places: the card shows the settled places (the longest is line 3)", lcard3.updates[1].report.lines[1].number, 3)
+expect("same lengths in other places: a second draw was needed", repaints.n, 2)
+
+-- the page has one more line after the draw (the first lines are the same): not settled either, the lengths of the
+-- lists are compared too
+reset()
+local lp4 = delayedPlugin(true, function(c)
+    if c.font_size == 22 then return { ("b"):rep(70), ("w"):rep(59) } end
+    return { ("b"):rep(70), ("w"):rep(59), ("c"):rep(45) }
+end)
+lp4:showPage()
+local lcard4 = shown[1]
+expect("one more line after the draw: before, two lines are listed", #lcard4.opts.report.lines, 2)
+lcard4.opts.on_control("text_more")
+expect("one more line after the draw: the card lists three", #lcard4.updates[1].report.lines, 3)
+expect("one more line after the draw: a second draw was needed", repaints.n, 2)
+
+-- the page is empty once it is drawn (a change that pushed the text off it): the old numbers stay, and two empty
+-- measurements in a row count as settled (no draws without end)
+reset()
+local lp5 = delayedPlugin(true, function(c)
+    if c.font_size == 22 then return { ("b"):rep(70), ("w"):rep(59), ("c"):rep(45) } end
+    return {}
+end)
+lp5:showPage()
+local lcard5 = shown[1]
+lcard5.opts.on_control("text_more")
+expect("an empty page after the draw: the card is redrawn once", #lcard5.updates, 1)
+expect("an empty page after the draw: the old numbers stay (70)", lcard5.updates[1].report.chars, 70)
+expect("an empty page after the draw: settled after 2 draws, not 3", repaints.n, 2)
+
+-- measuring raises while settling (here KOReader's clean-up of the text does): logged, the old numbers stay, the card
+-- is still redrawn
+reset()
+local rp = delayedPlugin(true)
+rp:showPage()
+local rcard = shown[1]
+local util_real = require("util").cleanupSelectedText
+require("util").cleanupSelectedText = function() error("clean boom") end
+rcard.opts.on_control("margins_more")
+require("util").cleanupSelectedText = util_real
+expect("settling with a page that cannot be read: one warning", #warns, 1)
+expect("settling with a page that cannot be read: the old numbers stay (70)", rcard.updates[1].report.chars, 70)
+expect("settling with a page that cannot be read: the card is redrawn", #rcard.updates, 1)
+expect("settling with a page that cannot be read: nothing was drawn (it failed on the first measurement)", repaints.n, 0)
+-- the page can be read at first and fails after the draw: the old numbers stay as well
+reset()
+local rp2 = delayedPlugin(true)
+rp2:showPage()
+local rcard2 = shown[1]
+local calls = 0
+require("util").cleanupSelectedText = function(...) calls = calls + 1; if calls > 4 then error("late boom") end return util_real(...) end
+repaints.hook = function() calls = 100 end
+rcard2.opts.on_control("margins_more")
+require("util").cleanupSelectedText = util_real
+expect("a page that fails after the draw: one warning", #warns, 1)
+expect("a page that fails after the draw: the old numbers stay", rcard2.updates[1].report.chars, 70)
+
+-- Cancel on the shrunk card (revert) also gets the settled page
+reset()
+local cp, cdoc, crendered = delayedPlugin(true)
+cp:showPage()
+local ccard = shown[1]
+ccard.opts.on_control("margins_more")
+ccard.opts.on_control("text_more")
+expect("revert (delayed): before, the card shows margins 25 / size 23 (52)", ccard.updates[2].report.chars, 52)
+ccard.opts.on_control("revert")
+expect("revert (delayed): back to the start's 70, not one behind (52)", ccard.updates[3].report.chars, 70)
+expect("revert (delayed): the steppers show 10 and 22", ccard.updates[3].values.margins .. "," .. ccard.updates[3].values.size, "10,22")
+-- Cancel on the full card (cancel) closes the card: nothing is measured, so nothing is drawn
+local repaints_cancel = repaints.n
+ccard.opts.on_control("margins_more")
+local repaints_step = repaints.n
+ccard.opts.on_control("cancel")
+expect("cancel (delayed): the card is closing, so the page is not drawn for a measurement", repaints.n, repaints_step)
+repaints.hook = nil
+
+-- 11l. pageValues: what the steppers show. nil when the layout is not known; two numbers when the sides differ
+local pl_v = layoutPlugin({ h_page_margins = { 10, 14 }, font_size = 22.5 })
+local v_ok, v = pcall(pl_v.pageValues, pl_v)
+expect("pageValues does not raise", v_ok, true)
+expect("pageValues: different margins show both, a half size shows the half", v and (v.margins .. "," .. v.size), "10/14,22.5")
+for label, conf in pairs({ ["none"] = false, ["no margins"] = { font_size = 22 }, ["margins as text"] = { h_page_margins = { "1", "2" }, font_size = 22 } }) do
+    local pl = pagePlugin(conf and layoutBook(conf, function() return { L1 } end) or fakeDoc({ L1 }))
+    local ok_values, values = pcall(pl.pageValues, pl)
+    expect("pageValues (" .. label .. ") does not raise", ok_values, true)
+    expect("pageValues (" .. label .. ") is nil", values, nil)
+end
+
+-- 11m. Cancel: everything is put back as it was when the card opened (the card closes itself, so there is nothing
+-- to measure or redraw)
+reset()
+local p11, _u11, d11, e11 = layoutPlugin()
+p11:showPage()
+local c11 = shown[1]
+c11.opts.on_control("margins_more") -- 10 -> 25
+c11.opts.on_control("text_more") -- 22 -> 23
+local n11, redraws11 = #e11, #c11.updates
+c11.opts.on_control("cancel")
+expect("cancel: margins first, then the size, as at the start", table.concat(e11, "|", n11 + 1),
+    "ConfigChange:h_page_margins:10,10|SetPageHorizMargins:10,10|ConfigChange:font_size:22|SetFontSize:22")
+expect("cancel: the book is as it was", show(d11.configurable.h_page_margins) .. "/" .. d11.configurable.font_size, "10,10/22")
+expect("cancel: the card is not redrawn (it is closing)", #c11.updates, redraws11)
+-- the same card, asked again: nothing is left to put back
+n11 = #e11
+c11.opts.on_control("cancel")
+expect("cancel twice: nothing more is set", #e11, n11)
+
+-- only the margins changed: only the margins are set back
+reset()
+local p12, _u12, d12, e12 = layoutPlugin()
+p12:showPage()
+local c12 = shown[1]
+c12.opts.on_control("margins_more")
+local n12 = #e12
+c12.opts.on_control("cancel")
+expect("cancel with only the margins changed: only the margins", table.concat(e12, "|", n12 + 1), "ConfigChange:h_page_margins:10,10|SetPageHorizMargins:10,10")
+
+-- nothing was changed: nothing is set
+reset()
+local p13, _u13, _d13, e13 = layoutPlugin()
+p13:showPage()
+shown[1].opts.on_control("cancel")
+expect("cancel with nothing changed: no event", #e13, 0)
+expect("cancel with nothing changed: no redraw", #shown[1].updates, 0)
+
+-- after a revert everything is as it was: Cancel has nothing to do
+reset()
+local p14, _u14, _d14, e14 = layoutPlugin()
+p14:showPage()
+local c14 = shown[1]
+c14.opts.on_control("text_more")
+c14.opts.on_control("revert")
+local n14 = #e14
+c14.opts.on_control("cancel")
+expect("cancel after revert: no event", #e14, n14)
+
+-- changed by hand back to the original, then Cancel: the layout is the same, so nothing is set
+reset()
+local p15, _u15, _d15, e15 = layoutPlugin()
+p15:showPage()
+local c15 = shown[1]
+c15.opts.on_control("text_more") -- 22 -> 23
+c15.opts.on_control("text_less") -- 23 -> 22
+local n15 = #e15
+c15.opts.on_control("cancel")
+expect("cancel when the layout is already the original: no event", #e15, n15)
+
+-- the old Undo id does nothing even with something to put back (Undo was removed: Cancel on the shrunk card does it)
+reset()
+local p17, _u17, d17, e17 = layoutPlugin()
+p17:showPage()
+local c17 = shown[1]
+c17.opts.on_control("margins_more")
+local n17, redraws17 = #e17, #c17.updates
+c17.opts.on_control("undo")
+expect("the old undo id sets nothing", #e17, n17)
+expect("the old undo id does not redraw", #c17.updates, redraws17)
+expect("the old undo id leaves the layout alone", show(d17.configurable.h_page_margins), "25,25")
+-- Cancel still finds the layout from before, so the unknown id did not clear it
+c17.opts.on_control("cancel")
+expect("cancel after the old undo id: margins put back", show(d17.configurable.h_page_margins), "10,10")
+
+-- the reader fails while putting it back: logged, no error reaches KOReader
+reset()
+local p16, u16, _d16 = layoutPlugin()
+p16:showPage()
+local c16 = shown[1]
+c16.opts.on_control("margins_more")
+u16.fail_event = true
+local cancel_ok = pcall(c16.opts.on_control, "cancel")
+expect("cancel with a failing reader: no error escapes", cancel_ok, true)
+expect("cancel with a failing reader: it is logged", #warns, 1)
 
 if failures > 0 then
     error(failures .. " main test(s) failed")

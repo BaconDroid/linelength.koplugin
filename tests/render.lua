@@ -93,6 +93,24 @@ pageCard({ ln(60, "only one line has text on this page at all", 3) }, true, "car
 -- the widest letters, at the cut-off length: the text must stop before the number, never run into it
 pageCard({ ln(88, string.rep("W", 60), 1), ln(80, string.rep("M", 60), 10), ln(75, "déjà vu, naïve café – “quoted” text with accents and punctuation", 24) }, true, "card_page_wide")
 
+-- the whole-page card with the steppers and the buttons that change the margins and the text size, full size and
+-- shrunk (the state after a tap on a stepper: Cancel and Accept at the bottom, Cancel and Done on the full card)
+local ALL = { margins_less = true, margins_more = true, text_less = true, text_more = true }
+local VALUES = { margins = "10", size = "22" }
+local function controlCard(top, use_color, controls, name, values)
+    local function new() return Details:new{ report = Report.buildPage(top, LABELS), use_color = use_color, controls = controls, values = values or VALUES } end
+    snap(name, new())
+    local shrunk = new()
+    shrunk.compact = true
+    shrunk:build()
+    snap(name .. "_compact", shrunk)
+end
+controlCard(PAGE, true, ALL, "card_page_controls")
+controlCard(PAGE, false, ALL, "card_page_controls_nocolour")
+-- with some limits reached: margins cannot go wider, text cannot go smaller
+controlCard(PAGE, true, { margins_less = true, margins_more = false, text_less = false, text_more = true }, "card_page_controls_limits", { margins = "140", size = "12" })
+controlCard({ ln(60, "only one line has text on this page at all", 3) }, true, ALL, "card_page_controls_one_line")
+
 -- the highlight dialog with our single plain button, as a user would see it
 local function btn(text) return { text = text, callback = function() end } end
 snap("dialog_with_button", ButtonDialog:new{
