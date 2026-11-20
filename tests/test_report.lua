@@ -23,11 +23,11 @@ expect("chars", r.chars, 60)
 expect("chars without spaces", r.chars_no_spaces, 50)
 expect("words", r.words, 9)
 
--- the four bands, best first, with labels, ranges and colours; Comfortable has two ranges
+-- the four bands, best first, with labels, ranges and colours
 expect("band count", #r.bands, 4)
 local want = {
     { "excellent", "Excellent", "50–66", "#0072B2" },
-    { "comfortable", "Comfortable", "45–49, 67–75", "#009E73" },
+    { "comfortable", "Comfortable", "67–75", "#009E73" },
     { "still_readable", "Still readable", "76–80", "#E69F00" },
     { "too_long", "Too long", "81+", "#D55E00" },
 }
@@ -48,9 +48,8 @@ local function current(chars)
     return table.concat(ids, ",")
 end
 expect("0 has no current band", current(0), "")
-expect("44 has no current band", current(44), "")
-expect("45", current(45), "comfortable")
-expect("49", current(49), "comfortable")
+expect("45 has no current band (short)", current(45), "")
+expect("49 has no current band (short)", current(49), "")
 expect("50", current(50), "excellent")
 expect("66", current(66), "excellent")
 expect("67", current(67), "comfortable")
@@ -70,9 +69,11 @@ local s = build(30)
 expect("short id", s.tier.id, "short")
 expect("short label", s.tier.label, "Short")
 expect("short has no colour", s.tier.color, nil)
+local s49 = build(49)
+expect("49 is Short", s49.tier.id, "short")
 local c = build(70)
 expect("70 is Comfortable", c.tier.id, "comfortable")
-expect("70: Comfortable (its second range) is current", c.bands[2].current, true)
+expect("70: Comfortable is current", c.bands[2].current, true)
 
 if failures > 0 then
     error(failures .. " report test(s) failed")

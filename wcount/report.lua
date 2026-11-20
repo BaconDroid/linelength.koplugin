@@ -4,30 +4,25 @@ local Rating = require("wcount/rating")
 
 local Report = {}
 
-local function rangeText(range)
-    if range.max then
-        return string.format("%d–%d", range.min, range.max)
+local function rangeText(band)
+    if band.max then
+        return string.format("%d–%d", band.min, band.max)
     end
-    return string.format("%d+", range.min)
+    return string.format("%d+", band.min)
 end
 
 --- @param counts table { words, chars, chars_no_spaces } as returned by wcount/counter
 --- @param labels table band id -> display label (too_long, still_readable, comfortable, excellent, short)
 --- @return table { chars, chars_no_spaces, words, tier = { id, label, color }, bands = { { id, label, range, color, current }, ... } }
 --- `bands` runs from the best band to the worst and leaves out "short", which has no range of its own.
---- A band with two ranges (Comfortable sits on both sides of Excellent) shows them as "45–49, 67–75".
 function Report.build(counts, labels)
     local tier = Rating.forChars(counts.chars)
     local bands = {}
     for _i, band in ipairs(Rating.BANDS) do
-        local parts = {}
-        for _j, range in ipairs(band.ranges) do
-            parts[#parts + 1] = rangeText(range)
-        end
         bands[#bands + 1] = {
             id = band.id,
             label = labels[band.id],
-            range = table.concat(parts, ", "),
+            range = rangeText(band),
             color = band.color,
             current = band.id == tier.id,
         }

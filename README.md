@@ -35,9 +35,9 @@ typography and from accessibility guidance on the length of a line (the "measure
 
 | Characters | Verdict | Basis |
 |---|---|---|
-| under 45 | Short | Below Bringhurst's 45 to 75 range for a single column |
+| under 50 | Short | Below the 50 where Baymard and Ruder start. Bringhurst accepts lines down to 45 in a single column, so 45–49 shows as Short |
 | 50–66 | Excellent | From the 50–60 that Ruder found optimal (as quoted by Baymard) up to the 66 that Bringhurst calls ideal |
-| 45–49 and 67–75 | Comfortable | Inside Bringhurst's 45 to 75 range but off the ideal; 75 is also Baymard's upper limit |
+| 67–75 | Comfortable | The rest of the satisfactory range: inside Bringhurst's 45 to 75 and Baymard's 50 to 75, but past the ideal |
 | 76–80 | Still readable | Past 75, within the 80-character limit of WCAG 1.4.8 |
 | 81 and more | Too long | Over the 80-character limit of WCAG 1.4.8 |
 
@@ -48,7 +48,7 @@ line sits between them.
 Not covered:
 
 - **Two columns.** Bringhurst gives 40 to 50 characters as better for multi-column work. The ranges
-  above are for a single column, so a good two-column line of 40 to 44 characters shows as "Short".
+  above are for a single column, so a good two-column line of 40 to 49 characters shows as "Short".
 - **Chinese, Japanese and Korean.** WCAG puts the limit at 40 glyphs for these scripts, not 80.
 - **Landscape.** The ranges apply unchanged. A wider page holds more characters per line at the same
   font size, so raise the font size or the margins to stay in range.

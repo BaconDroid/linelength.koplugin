@@ -10,14 +10,14 @@ local function expect(name, got, want)
     end
 end
 
--- Every edge. Bands: under 45 short; 50-66 Excellent; 45-49 and 67-75 Comfortable;
--- 76-80 Still readable; 81+ Too long.
+-- Every edge. Bands: under 50 short; 50-66 Excellent; 67-75 Comfortable; 76-80 Still readable;
+-- 81+ Too long.
 local cases = {
     { 0, "short", nil },
     { 1, "short", nil },
     { 44, "short", nil },
-    { 45, "comfortable", "#009E73" },
-    { 49, "comfortable", "#009E73" },
+    { 45, "short", nil },
+    { 49, "short", nil },
     { 50, "excellent", "#0072B2" },
     { 66, "excellent", "#0072B2" },
     { 67, "comfortable", "#009E73" },
@@ -39,14 +39,13 @@ expect("negative", Rating.forChars(-5).id, "short")
 expect("not a number", Rating.forChars("abc").id, "short")
 expect("numeric string", Rating.forChars("60").id, "excellent")
 expect("fraction rounds down (66.5 is 66)", Rating.forChars(66.5).id, "excellent")
-expect("fraction rounds down (49.9 is 49)", Rating.forChars(49.9).id, "comfortable")
+expect("fraction rounds down (49.9 is 49)", Rating.forChars(49.9).id, "short")
 
 -- exactly one answer for every count 0..300, checked against an independent if-chain, and the
--- totals worked out by hand: short 0-44 = 45, comfortable 45-49 + 67-75 = 5 + 9 = 14,
--- excellent 50-66 = 17, still readable 76-80 = 5, too long 81-300 = 220 (45+14+17+5+220 = 301)
+-- totals worked out by hand: short 0-49 = 50, excellent 50-66 = 17, comfortable 67-75 = 9,
+-- still readable 76-80 = 5, too long 81-300 = 220 (50+17+9+5+220 = 301)
 local function expected(n)
-    if n < 45 then return "short" end
-    if n <= 49 then return "comfortable" end
+    if n < 50 then return "short" end
     if n <= 66 then return "excellent" end
     if n <= 75 then return "comfortable" end
     if n <= 80 then return "still_readable" end
@@ -58,9 +57,9 @@ for n = 0, 300 do
     expect("oracle at " .. n, id, expected(n))
     totals[id] = (totals[id] or 0) + 1
 end
-expect("total short", totals.short, 45)
-expect("total comfortable", totals.comfortable, 14)
+expect("total short", totals.short, 50)
 expect("total excellent", totals.excellent, 17)
+expect("total comfortable", totals.comfortable, 9)
 expect("total still readable", totals.still_readable, 5)
 expect("total too long", totals.too_long, 220)
 

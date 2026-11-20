@@ -127,7 +127,7 @@ expect("the card is not loaded until needed", package.loaded["wcount/details"], 
 
 -- 4. the label at every band edge
 local bands = {
-    { 44, "Short" }, { 45, "Comfortable" }, { 49, "Comfortable" }, { 50, "Excellent" },
+    { 44, "Short" }, { 45, "Short" }, { 49, "Short" }, { 50, "Excellent" },
     { 66, "Excellent" }, { 67, "Comfortable" }, { 75, "Comfortable" }, { 76, "Still readable" },
     { 80, "Still readable" }, { 81, "Too long" }, { 200, "Too long" },
 }
@@ -156,7 +156,7 @@ expect("short has no colour", report.tier.color, nil)
 expect("four ranges", #report.bands, 4)
 expect("range label is translated text", report.bands[1].label, "Excellent")
 expect("range 1", report.bands[1].range, "50–66")
-expect("range 2 (two parts)", report.bands[2].range, "45–49, 67–75")
+expect("range 2", report.bands[2].range, "67–75")
 expect("range 4", report.bands[4].range, "81+")
 
 tap(string.rep("a", 60))
@@ -176,7 +176,7 @@ expect("colour check raised: use_color false", shown[1].opts.use_color, false)
 
 -- 7. if the card cannot be shown, the same information appears as plain text
 local PLAIN = "Characters, with spaces: 18\nCharacters, without spaces: 16\nWords: 3\n\n"
-    .. "Characters per line (select one line):\n50–66  Excellent\n45–49, 67–75  Comfortable\n76–80  Still readable\n81+  Too long"
+    .. "Characters per line (select one line):\n50–66  Excellent\n67–75  Comfortable\n76–80  Still readable\n81+  Too long"
 
 -- 7a. the card module fails to load
 package.loaded["wcount/details"] = nil
