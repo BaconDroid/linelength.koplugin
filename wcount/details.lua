@@ -1,6 +1,7 @@
--- The details card of the Word count plugin: a small dialog with the characters of the selection,
--- a verdict for the line length, the counts, and the four ranges with the current one marked.
--- Built from KOReader's own widgets and modelled on InfoMessage (tap anywhere to close).
+-- The details card of the Word count plugin: a small dialog with the characters of the selection or
+-- the longest lines of a page, a verdict for the line length, and the four ranges with the current one
+-- marked. Built from KOReader's own widgets and modelled on InfoMessage: tap anywhere, or the X in the
+-- top right corner, to close it.
 -- It takes a report from wcount/report and never touches the selection itself.
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -9,6 +10,8 @@ local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
@@ -16,6 +19,7 @@ local OverlapGroup = require("ui/widget/overlapgroup")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
 local TextWidget = require("wcount/colortext") -- TextWidget that can keep colour (see that file)
+local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -56,6 +60,10 @@ function Details:init()
     local small_face = Font:getFace("x_smallinfofont")
     local row_face = Font:getFace("smallinfofont")
     local row_bold_face = Font:getFace("smallinfofontbold")
+    -- the list of longest lines on a page is secondary information: a size smaller than the other rows
+    local list_face = Font:getFace("xx_smallinfofont")
+    local list_bold_face = Font:getFace("smallinfofontbold", 18)
+    local heading_face = Font:getFace("smallinfofontbold", 20)
 
     -- "#RRGGBB" to a colour, or nil (standard text colour) when the screen is not drawing in colour
     local function color(hex)
@@ -74,10 +82,8 @@ function Details:init()
         return CenterContainer:new{ dimen = Geom:new{ w = width, h = widget:getSize().h }, widget }
     end
 
-    -- label on the left, value on the right
-    local function row(left_text, right_text, left_face, right_face, left_color, right_color)
-        local left = TextWidget:new{ text = left_text, face = left_face, fgcolor = left_color }
-        local right = TextWidget:new{ text = right_text, face = right_face, fgcolor = right_color }
+    -- two widgets side by side: one against the left edge, one against the right
+    local function sideBySide(left, right)
         local height = math.max(left:getSize().h, right:getSize().h)
         local dimen = Geom:new{ w = width, h = height }
         return OverlapGroup:new{
@@ -85,6 +91,46 @@ function Details:init()
             LeftContainer:new{ dimen = Geom:new{ w = width, h = height }, left },
             RightContainer:new{ dimen = Geom:new{ w = width, h = height }, right },
         }
+    end
+
+    -- label on the left, value on the right; a long label is cut so it never runs into the value
+    local function row(left_text, right_text, left_face, right_face, left_color, right_color)
+        local right = TextWidget:new{ text = right_text, face = right_face, fgcolor = right_color }
+        local left = TextWidget:new{
+            text = left_text, face = left_face, fgcolor = left_color,
+            max_width = width - right:getSize().w - Screen:scaleBySize(16),
+        }
+        return sideBySide(left, right)
+    end
+
+    -- One of the longest lines of a page: "L5:" (its number from the top of the page), the start of its
+    -- text, and its length on the right. `label_width` is the widest label, so the texts line up.
+    local function listRow(line, label_width)
+        local gap_width = Screen:scaleBySize(10)
+        local label = TextWidget:new{ text = line.number and string.format("L%d:", line.number) or "", face = list_bold_face }
+        local right = TextWidget:new{ text = string.format("%d", line.chars), face = list_bold_face }
+        local text = TextWidget:new{
+            text = line.snippet, face = list_face,
+            max_width = width - label_width - gap_width - right:getSize().w - Screen:scaleBySize(16),
+        }
+        return sideBySide(HorizontalGroup:new{
+            align = "center",
+            label,
+            HorizontalSpan:new{ width = label_width - label:getSize().w + gap_width },
+            text,
+        }, right)
+    end
+
+    local function labelWidth(lines)
+        local widest = 0
+        for _i, line in ipairs(lines) do
+            if line.number then
+                local label = TextWidget:new{ text = string.format("L%d:", line.number), face = list_bold_face }
+                widest = math.max(widest, label:getSize().w)
+                label:free()
+            end
+        end
+        return widest
     end
 
     local function divider()
@@ -101,20 +147,39 @@ function Details:init()
     local tier_color = color(report.tier.color)
 
     local content = VerticalGroup:new{ align = "center" }
-    table.insert(content, centered(_("Line length"), title_face))
-    table.insert(content, gap(6))
-    table.insert(content, divider())
+    -- the title, a line under it, and the X that closes the card in the top right corner
+    self.titlebar = TitleBar:new{
+        width = width,
+        title = _("Line length"),
+        title_face = title_face,
+        with_bottom_line = true,
+        bottom_line_color = Blitbuffer.COLOR_GRAY,
+        close_callback = function() UIManager:close(self) end,
+        show_parent = self,
+    }
+    table.insert(content, self.titlebar)
     table.insert(content, gap(10))
     table.insert(content, centered(string.format("%d", report.chars), big_face, tier_color))
-    table.insert(content, centered(_("characters"), small_face))
+    table.insert(content, centered(report.lines and _("characters in the longest line") or _("characters"), small_face))
     table.insert(content, gap(4))
     table.insert(content, centered(report.tier.label, verdict_face, tier_color))
     table.insert(content, gap(12))
     table.insert(content, divider())
     table.insert(content, gap(8))
-    table.insert(content, row(_("With spaces"), string.format("%d", report.chars), row_face, row_bold_face))
-    table.insert(content, row(_("Without spaces"), string.format("%d", report.chars_no_spaces), row_face, row_bold_face))
-    table.insert(content, row(_("Words"), string.format("%d", report.words), row_face, row_bold_face))
+    if report.lines then
+        -- a whole page: say what the rows are (in bold), then the longest lines, each with its number
+        -- on the page and the start of its text
+        table.insert(content, centered(#report.lines == 1 and _("Longest line on this page:") or _("Longest lines on this page:"), heading_face))
+        table.insert(content, gap(6))
+        local label_width = labelWidth(report.lines)
+        for _i, line in ipairs(report.lines) do
+            table.insert(content, listRow(line, label_width))
+        end
+    else
+        table.insert(content, row(_("With spaces"), string.format("%d", report.chars), row_face, row_bold_face))
+        table.insert(content, row(_("Without spaces"), string.format("%d", report.chars_no_spaces), row_face, row_bold_face))
+        table.insert(content, row(_("Words"), string.format("%d", report.words), row_face, row_bold_face))
+    end
     table.insert(content, gap(8))
     table.insert(content, divider())
     table.insert(content, gap(8))

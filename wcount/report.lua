@@ -1,8 +1,12 @@
 -- Builds what the details card shows from the counts of a selection. Pure Lua: no KOReader
 -- requires, so it is tested on a desktop Lua. Labels are passed in so the caller can translate them.
 local Rating = require("wcount/rating")
+local PageLines = require("wcount/pagelines")
 
 local Report = {}
+
+-- How many characters of a line are shown to tell it apart from the others on the page.
+local SNIPPET_CHARS = 32
 
 local function rangeText(band)
     if band.max then
@@ -34,6 +38,24 @@ function Report.build(counts, labels)
         tier = { id = tier.id, label = labels[tier.id], color = tier.color },
         bands = bands,
     }
+end
+
+--- The report for a whole page: the rating is the one of the longest line, and `lines` lists the longest
+-- lines with their number on the page and the start of their text, so they can be found on the page.
+--- @param top table the longest lines, longest first, from wcount/pagelines (never empty)
+--- @param labels table as for build
+--- @return table what build returns for the longest line, plus lines = { { number, chars, snippet }, ... }
+function Report.buildPage(top, labels)
+    local report = Report.build(top[1], labels)
+    report.lines = {}
+    for i, line in ipairs(top) do
+        report.lines[i] = {
+            number = line.number,
+            chars = line.chars,
+            snippet = PageLines.snippet(line.text, SNIPPET_CHARS),
+        }
+    end
+    return report
 end
 
 return Report

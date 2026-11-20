@@ -1,7 +1,11 @@
 # Word count: a line-length checker for KOReader
 
-Select one line of text in KOReader and the highlight dialog tells you how many characters it holds
-and whether that is a good line length for reading. Tap the button for the details.
+Two ways to check how long the lines of a book are, and whether that is a good length for reading:
+
+- **A line you select.** Select one line of text and the highlight dialog tells you how many characters it
+  holds and how that reads. Tap the button for the details.
+- **The whole page.** *Line length: this page* in the Typeset menu lists the longest lines on the page you
+  are looking at, rated by the longest. No selection, and no highlight dialog needed.
 
 | <img src="docs/selection-dialog.png" width="400" alt="The selection dialog in KOReader with an extra last button reading Line: 56 chars, Excellent"> | <img src="docs/details-card.png" width="400" alt="The details card: 56 characters, Excellent, counts with and without spaces, words, and the four ranges"> |
 |:---:|:---:|
@@ -26,6 +30,8 @@ size and margins until the line reads **Excellent**.
 
 ## Using it
 
+### A line you select
+
 1. Open a book. Long-press the first word of a line and drag to the end of the line.
 2. The selection dialog has one extra button, last and full width: `Line: 58 chars · Excellent`.
 3. Tap it for a card with the character count, the verdict, the counts with and without spaces, the
@@ -34,6 +40,27 @@ size and margins until the line reads **Excellent**.
 
 The number is for whatever you select, so select one line. In justified text the lines differ by a few
 characters, so check two or three.
+
+### The whole page
+
+1. Open the Typeset menu (the style icon) and tap **Line length: this page**.
+2. The card shows the **longest line** on the page, its verdict and the four ranges. Under the bold heading
+   *Longest lines on this page:* are the three longest lines, each as `L5: start of the text … 54`: `L5` is
+   that line's place on the page, counted from the top (the fifth line), then the start of its text, then
+   its length in characters.
+3. Tap the X in the top right corner, or anywhere, to close it.
+
+The action is also in KOReader's gesture list as *Line length: this page*, so it can go on a tap zone, a
+corner or a profile.
+
+Why the longest lines and not an average: the last line of every paragraph is short, so an average
+over the page would say less about the text than about how many paragraphs it has. The longest lines are
+not touched by that, and a line that is too long is the one that tires the eye. It is also the strictest
+reading: justified lines vary by a few characters, so the longest is a little above the typical line.
+The verdict is the longest line's.
+
+It reads the lines of the page that is on screen, so it works only in books that reflow (EPUB, FB2 and
+the like), not in a PDF or a comic.
 
 ## What the ranges are
 
@@ -69,6 +96,11 @@ Not covered:
   are not counted.
 - A word is a run of characters between spaces that has at least one character that is not
   punctuation, so a lone dash or `...` is not a word.
+- **Hyphenated words.** Selecting text snaps to whole words, so if a line ends in a hyphenated word
+  (`moun-` / `tain`) the button counts the whole word on that line. The whole-page check does not: it
+  asks KOReader where each letter of the first and last word of every line is drawn and counts only
+  those on the line. On a test book the plain count made the longest line read up to 10 characters too
+  long. The hyphen that KOReader draws at the break is not counted.
 
 ## Colour
 
@@ -101,7 +133,13 @@ show on its screen.
 ## How it works
 
 - `main.lua` registers the button in slot `13_line_length`. KOReader sorts the buttons by that key, so
-  the button comes after the built-in ones. It builds the label each time the dialog opens.
+  the button comes after the built-in ones. It builds the label each time the dialog opens. It also adds
+  the Typeset menu item and the `wordcount_page` gesture action.
+- `wcount/pagelines.lua` reads the lines of the page on screen from KOReader's document engine
+  (`getTextFromPositions` for the lines, `getScreenPositionFromXPointer` to find which letters of a
+  hyphenated word are on which line, `getTextFromXPointers` to read the text that is left) and picks the
+  longest. It does not use KOReader itself: the engine is passed in, so it is tested on a desktop with a
+  fake one.
 - `wcount/counter.lua` counts and `wcount/rating.lua` holds the ranges. Neither uses KOReader, so both
   are tested on a desktop.
 - `wcount/report.lua` shapes the numbers for the card, and `wcount/details.lua` draws it from KOReader's
@@ -120,8 +158,19 @@ python3 -m venv .venv && .venv/bin/pip install lupa
 
 There is no `lua` binary needed: the tests run in [lupa](https://pypi.org/project/lupa/). They cover
 the counting (checked against Python's own `len()` on 3000 random strings), every edge of every range,
-the card's data, and the wiring in `main.lua` with KOReader stubbed out. The wiring test models source,
-not the device.
+the card's data, the page reading against a fake document engine (hyphenated words, page edges, an
+engine that fails), and the wiring in `main.lua` with KOReader stubbed out. The wiring test models
+source, not the device.
+
+`tests/engine.lua` runs the page reading against KOReader's real text engine (crengine) on the books
+made by `tests/fixtures/make_epub.py`: for every page, justified and left-aligned, at three font sizes,
+the line lengths must add up exactly to the text of that page, and every line's number (the `L5`) must be
+the row the engine itself lists at that place on the page. It needs the desktop build of KOReader;
+the header of the file says how to run it.
+
+`tests/plugin.lua` runs the real `main.lua`, the real engine and the real card together: it checks that the
+numbers on the card match the page's own lines, that the X is in the top right corner and its action closes
+the card, and that the action runs through KOReader's own gesture dispatcher.
 
 `tests/render.lua` draws the button dialog and the cards with a desktop build of KOReader and saves
 PNGs at the size of a Libra Colour. It shows what the code draws into KOReader's buffer, not what a

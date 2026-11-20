@@ -77,6 +77,22 @@ card(88, true, "card_too_long_colour")
 card(30, true, "card_short_colour")
 card(58, false, "card_excellent_nocolour")
 
+-- the whole-page card: the longest lines of a page, rated by the longest
+local function ln(chars, text, number) return { chars = chars, chars_no_spaces = chars, words = 1, text = text, number = number } end
+local function pageCard(top, use_color, name)
+    snap(name, Details:new{ report = Report.buildPage(top, LABELS), use_color = use_color })
+end
+local PAGE = {
+    ln(70, "mountain the two go other and his valley like carefully silence", 5),
+    ln(66, "time shadow from its stranger quiet valley only mountain", 12),
+    ln(64, "carefully us so then shadow said then considerably as ancient", 23),
+}
+pageCard(PAGE, true, "card_page_colour")
+pageCard(PAGE, false, "card_page_nocolour")
+pageCard({ ln(60, "only one line has text on this page at all", 3) }, true, "card_page_one_line")
+-- the widest letters, at the cut-off length: the text must stop before the number, never run into it
+pageCard({ ln(88, string.rep("W", 60), 1), ln(80, string.rep("M", 60), 10), ln(75, "déjà vu, naïve café – “quoted” text with accents and punctuation", 24) }, true, "card_page_wide")
+
 -- the highlight dialog with our single plain button, as a user would see it
 local function btn(text) return { text = text, callback = function() end } end
 snap("dialog_with_button", ButtonDialog:new{

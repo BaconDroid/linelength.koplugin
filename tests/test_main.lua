@@ -4,7 +4,9 @@ package.path = "./?.lua;" .. package.path
 -- ---- stubs --------------------------------------------------------------------------------
 local shown, warns = {}, {}
 local color_state = { on = true } -- true, false, or "error" (isColorEnabled raises)
+local screen_state = { raises = false } -- true: asking for the screen size raises
 local details_opts = {}           -- what the card was asked to show
+local actions = {}                -- Dispatcher actions registered
 
 local function extend(base, t)
     t = t or {}
@@ -32,10 +34,20 @@ package.preload["ui/uimanager"] = function()
 end
 -- No ffi/blitbuffer stub on purpose: main.lua must not need it any more.
 package.preload["device"] = function()
-    return { screen = { isColorEnabled = function()
-        if color_state.on == "error" then error("no screen") end
-        return color_state.on == true
-    end } }
+    return { screen = {
+        isColorEnabled = function()
+            if color_state.on == "error" then error("no screen") end
+            return color_state.on == true
+        end,
+        getWidth = function()
+            if screen_state.raises then error("no screen size") end
+            return 1264
+        end,
+        getHeight = function() return 1680 end,
+    } }
+end
+package.preload["dispatcher"] = function()
+    return { registerAction = function(_self, name, def) actions[name] = def end }
 end
 package.preload["logger"] = function()
     return {
@@ -229,6 +241,199 @@ expect("rows", #rows, 6)
 expect("ours is alone on a full-width last row", #rows[#rows], 1)
 expect("and it is ours", rows[#rows][1], "13_line_length")
 expect("Search stays where it was", rows[5][2], "12_search")
+
+-- ---------------------------------------------------------------------------------------------
+-- 10. the whole-page measurement
+local function fakeDoc(line_texts, opts)
+    opts = opts or {}
+    local NODE = "/b/p[1]/text()[1]"
+    local lines, offset = {}, 0
+    for i, s in ipairs(line_texts) do
+        lines[i] = { s = s, from = offset, to = offset + #s, y = 71 + (i - 1) * 64 }
+        offset = offset + #s + 1
+    end
+    local d = {}
+    function d:getTextFromPositions(p0, _p1)
+        if opts.raises then error("engine boom") end
+        if p0.y == 0 then
+            local boxes = {}
+            for _i, l in ipairs(lines) do boxes[#boxes + 1] = { x = 43, y = l.y, w = 1180, h = 64 } end
+            return { text = "page", pos0 = NODE .. ".0", pos1 = NODE .. "." .. offset, sboxes = boxes }
+        end
+        for _i, l in ipairs(lines) do
+            if p0.y >= l.y and p0.y < l.y + 64 then
+                return { text = l.s, pos0 = NODE .. "." .. l.from, pos1 = NODE .. "." .. l.to }
+            end
+        end
+    end
+    function d:getScreenPositionFromXPointer(xp)
+        local off = tonumber(xp:match("%.(%d+)$"))
+        for _i, l in ipairs(lines) do
+            if off >= l.from and off <= l.to then return l.y, 43 end
+        end
+        return 0, 0
+    end
+    function d:getTextFromXPointers() return "" end
+    return d
+end
+
+-- three lines: 59 characters ("word " x12 without the last space), 70, and 45
+local L1 = ("word "):rep(12):sub(1, -2)
+local L2 = ("b"):rep(70)
+local L3 = ("c"):rep(45)
+expect("test line 1 is 59 characters", #L1, 59)
+
+local function newMenu()
+    return { registered = {}, registerToMainMenu = function(self, p) self.registered[#self.registered + 1] = p end }
+end
+local function pagePlugin(doc, opts)
+    opts = opts or {}
+    actions = {}
+    local menu = newMenu()
+    local p = makePlugin({ document = {}, ui = { menu = menu, highlight = newHighlight(), document = doc, rolling = opts.rolling == nil and {} or opts.rolling } })
+    return p, menu
+end
+local function reset() shown, warns, details_opts, screen_state.raises, color_state.on = {}, {}, {}, false, true end
+
+-- 10a. registration: the action, the menu, and the selection button together
+local plugin, menu = pagePlugin(fakeDoc({ L1, L2, L3 }))
+local action = actions["wordcount_page"]
+expect("action registered", type(action), "table")
+expect("action event", action and action.event, "WordcountPage")
+expect("action title", action and action.title, "Line length: this page")
+expect("action is only for books that reflow", action and action.rolling, true)
+expect("and is not marked for every book type", action and action.reader, nil)
+expect("action has no category", action and action.category, "none")
+expect("registered with the menu once", #menu.registered, 1)
+expect("registered as this plugin", menu.registered[1], plugin)
+local items = {}
+plugin:addToMainMenu(items)
+expect("menu item text", items.wordcount_page and items.wordcount_page.text, "Line length: this page")
+expect("menu item goes in the Typeset menu", items.wordcount_page and items.wordcount_page.sorting_hint, "typeset")
+local item_count = 0
+for _k in pairs(items) do item_count = item_count + 1 end
+expect("one menu item", item_count, 1)
+
+-- 10b. nothing in the file manager (no document); a bare ui does not crash and still offers the action
+actions = {}
+local bare_menu = newMenu()
+makePlugin({ document = nil, ui = { menu = bare_menu } })
+expect("no document: no action", next(actions), nil)
+expect("no document: no menu", #bare_menu.registered, 0)
+actions = {}
+expect("no menu and no highlight: init does not crash", (pcall(makePlugin, { document = {}, ui = {} })), true)
+expect("no menu and no highlight: the action is still registered", type(actions["wordcount_page"]), "table")
+actions = {}
+local only_menu = newMenu()
+makePlugin({ document = {}, ui = { menu = only_menu } })
+expect("a menu without the highlight module", #only_menu.registered, 1)
+
+-- 10c. the menu item shows the card: the longest line sets the rating, three lines are listed
+reset()
+items = {}
+plugin:addToMainMenu(items)
+items.wordcount_page.callback()
+expect("menu item shows one widget", #shown, 1)
+expect("it is the card", shown[1] and shown[1].is_details, true)
+local pr = shown[1] and shown[1].opts.report
+expect("page report: the longest line (70)", pr and pr.chars, 70)
+expect("page report: verdict follows the longest line", pr and pr.tier.id, "comfortable")
+expect("page report: colour of that band", pr and pr.tier.color, "#009E73")
+expect("page report: Comfortable is the current range", pr and pr.bands[2].current, true)
+expect("page report: Excellent is not", pr and pr.bands[1].current, false)
+expect("page report: three lines listed", pr and #pr.lines, 3)
+expect("page report: longest first (70)", pr and pr.lines[1].chars, 70)
+expect("page report: then 59", pr and pr.lines[2].chars, 59)
+expect("page report: then 45", pr and pr.lines[3].chars, 45)
+expect("page report: long line cut to 32 characters and an ellipsis", pr and pr.lines[1].snippet, ("b"):rep(32) .. "…")
+expect("page report: snippet shows the start of the text", pr and pr.lines[2].snippet, "word word word word word word wo…")
+-- the page order is 59, 70, 45 (top to bottom), so by length the lines are the 2nd, the 1st and the 3rd
+expect("page report: the longest is line 2 of the page", pr and pr.lines[1].number, 2)
+expect("page report: the second longest is line 1 of the page", pr and pr.lines[2].number, 1)
+expect("page report: the third is line 3 of the page", pr and pr.lines[3].number, 3)
+expect("card asked for colour on a colour screen", shown[1].opts.use_color, true)
+
+-- 10d. the gesture action does the same, and says it handled the event
+reset()
+expect("the action handler reports it handled the event", plugin:onWordcountPage(), true)
+expect("the action shows the card too", shown[1] and shown[1].is_details, true)
+
+-- 10e. fewer than three lines: only those are listed
+reset()
+local small = pagePlugin(fakeDoc({ L2, L3 }))
+small:onWordcountPage()
+expect("two lines on the page: two listed", shown[1] and #shown[1].opts.report.lines, 2)
+reset()
+local single = pagePlugin(fakeDoc({ L3 }))
+single:onWordcountPage()
+expect("one line: 45 is Short, no colour", shown[1] and shown[1].opts.report.tier.id, "short")
+
+-- 10f. nothing to measure
+reset()
+local unsupported = pagePlugin(fakeDoc({ L1 }), { rolling = false })
+unsupported.ui.rolling = nil
+unsupported:onWordcountPage()
+expect("a book that does not reflow: a message", shown[1] and shown[1].is_infomessage, true)
+expect("and it says why", shown[1] and shown[1].text, "This only works in books that reflow, like EPUB.")
+reset()
+local no_methods = pagePlugin({})
+no_methods:onWordcountPage()
+expect("an engine without the line functions: same message", shown[1] and shown[1].text, "This only works in books that reflow, like EPUB.")
+reset()
+local blank = pagePlugin(fakeDoc({}))
+blank:onWordcountPage()
+expect("a page without text: a message", shown[1] and shown[1].is_infomessage, true)
+expect("and it says so", shown[1] and shown[1].text, "There is no text on this page.")
+reset()
+local broken_engine = pagePlugin(fakeDoc({ L1 }, { raises = true }))
+broken_engine:onWordcountPage()
+expect("an engine that raises reads as an empty page", shown[1] and shown[1].text, "There is no text on this page.")
+expect("without a crash or a warning", #warns, 0)
+
+-- an engine that has two of the three line functions is still not enough
+for _i, missing in ipairs({ "getTextFromXPointers", "getScreenPositionFromXPointer", "getTextFromPositions" }) do
+    reset()
+    local doc = fakeDoc({ L1 })
+    doc[missing] = nil
+    pagePlugin(doc):onWordcountPage()
+    expect("an engine without " .. missing .. ": not supported", shown[1] and shown[1].text, "This only works in books that reflow, like EPUB.")
+end
+
+-- the page is read the way the highlight button reads a selection: spaces collapsed first
+reset()
+pagePlugin(fakeDoc({ ("x"):rep(10) .. "   " .. ("y"):rep(10) })):onWordcountPage()
+expect("three spaces count as one (10 + 1 + 10)", shown[1] and shown[1].opts.report.chars, 21)
+
+-- 10g. anything unexpected is caught and reported, never raised into KOReader
+reset()
+screen_state.raises = true
+plugin:onWordcountPage()
+expect("unexpected error: a message is shown", shown[1] and shown[1].is_infomessage, true)
+expect("unexpected error: it says what failed", shown[1] and shown[1].text, "Could not read the lines of this page.")
+expect("unexpected error: one warning", #warns, 1)
+screen_state.raises = false
+
+-- 10h. the card fails: the same information as plain text
+local PLAIN_PAGE = "Longest lines on this page (characters):\n"
+    .. "L2: " .. ("b"):rep(32) .. "…  70\n"
+    .. "L1: word word word word word word wo…  59\n"
+    .. "L3: " .. ("c"):rep(32) .. "…  45\n\n"
+    .. "50–66  Excellent\n67–75  Comfortable\n76–80  Still readable\n81+  Too long"
+reset()
+package.loaded["wcount/details"] = nil
+package.preload["wcount/details"] = function() error("boom") end
+plugin:onWordcountPage()
+expect("card load failure: plain text popup", shown[1] and shown[1].is_infomessage, true)
+expect("card load failure: the lines and the ranges", shown[1] and shown[1].text, PLAIN_PAGE)
+expect("card load failure: one warning", #warns, 1)
+package.loaded["wcount/details"] = nil
+package.preload["wcount/details"] = function() return DetailsStub end
+
+-- 10i. the selection button is unaffected by all this
+reset()
+tap(sample.selected_text.text)
+expect("selection button still shows the selection report", shown[1] and shown[1].opts.report.lines, nil)
+expect("selection report keeps its counts", shown[1] and shown[1].opts.report.chars, 18)
 
 if failures > 0 then
     error(failures .. " main test(s) failed")
