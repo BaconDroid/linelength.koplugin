@@ -66,6 +66,8 @@ The verdict is the longest line's.
 It reads the lines of the page that is on screen, so it works only in books that reflow (EPUB, FB2 and
 the like), not in a PDF or a comic.
 
+Thanks to the reddit user [Zanzel_Melancthones](https://www.reddit.com/user/Zanzel_Melancthones) for the suggestion to implement it this way.
+
 ## What the ranges are
 
 A "character" is a character of the line including spaces and punctuation. The ranges come from print
