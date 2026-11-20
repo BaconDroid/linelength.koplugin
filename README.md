@@ -7,6 +7,14 @@ and whether that is a good line length for reading. Tap the button for the detai
 Line: 58 chars · Excellent
 ```
 
+## Requirements
+
+- KOReader with the selection dialog's `ReaderHighlight:addToHighlightDialog`, which the plugin uses to
+  add its button. I read it in the v2026.07.1 source and use it on v2026.07.2; I have not checked older
+  versions.
+- Any device KOReader runs on. Colour needs a colour screen with KOReader's colour rendering on; on
+  a black-and-white screen the card is in black and white. Only a Kobo Libra Colour has been tried.
+
 ## Why this exists
 
 I wanted the lines of a book to land in the recommended range of characters per line, and the way to
@@ -81,11 +89,15 @@ text colour. The button in the dialog is always plain, like the others.
 
 ## Install
 
-Copy this folder into KOReader's plugins folder as `wordcount.koplugin` and restart KOReader. On a Kobo
-that is `.adds/koreader/plugins/`. The plugin needs `_meta.lua`, `main.lua` and the `wcount/` folder.
+1. Download `wordcount.koplugin.zip` from the [latest release](../../releases/latest) and extract it.
+2. Copy the `wordcount.koplugin` folder into KOReader's plugins folder and restart KOReader. On a Kobo
+   that is `.adds/koreader/plugins/`.
+3. Open a book and select some text: the button is the last one in the dialog.
 
-It adds its button with `ReaderHighlight:addToHighlightDialog`, so it needs a KOReader that has that. It
-was written and tried on a Kobo Libra Colour with KOReader v2026.07.
+## Tested on
+
+A Kobo Libra Colour (firmware 4.45) with KOReader v2026.07.2. The button, the card and the colours
+show on its screen.
 
 ## How it works
 

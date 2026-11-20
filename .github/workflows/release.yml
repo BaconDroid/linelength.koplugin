@@ -1,0 +1,56 @@
+name: Release
+
+# Push a tag like "v0.1.0" to build wordcount.koplugin.zip and attach it to a GitHub Release.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # A tag with a hyphen after the version (v0.2.0-dev) is a prerelease.
+      - name: Decide whether this tag is a prerelease
+        id: kind
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Check that _meta.lua version matches the tag
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          meta_version=$(grep -oP 'version\s*=\s*"\K[^"]+' _meta.lua)
+          echo "Tag version:       $tag_version"
+          echo "_meta.lua version: $meta_version"
+          if [ "$tag_version" != "$meta_version" ]; then
+            echo "::error::Tag ($tag_version) does not match _meta.lua version ($meta_version)."
+            exit 1
+          fi
+
+      # Only what runs on the device goes in the zip, under a top-level plugin folder.
+      - name: Build plugin zip
+        run: |
+          stage="$RUNNER_TEMP/stage"
+          mkdir -p "$stage/wordcount.koplugin"
+          cp -r _meta.lua main.lua LICENSE wcount "$stage/wordcount.koplugin/"
+          cd "$stage"
+          zip -r "$GITHUB_WORKSPACE/wordcount.koplugin.zip" wordcount.koplugin \
+            -x "*.git*" -x "*/.DS_Store"
+          unzip -l "$GITHUB_WORKSPACE/wordcount.koplugin.zip"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ steps.kind.outputs.prerelease }}
+          files: wordcount.koplugin.zip
+          generate_release_notes: true
