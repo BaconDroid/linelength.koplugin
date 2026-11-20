@@ -1,5 +1,6 @@
--- Word count: shows how many words and characters you selected, and how that line length reads,
--- inside the dialog that appears after you select text (Select, Highlight, Copy, Add note, ...).
+-- Word count: after you select text, adds one button to the dialog (Select, Highlight, Copy, ...)
+-- that shows the length of the selection in characters and how that reads as a line of text.
+-- Tap it for the details: characters with and without spaces, words, and the ranges.
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
@@ -18,13 +19,11 @@ local WordCount = WidgetContainer:extend{
     is_doc_only = true,
 }
 
--- The highlight dialog lists its buttons sorted by these keys. The built-in ones run from
--- 01_select to 12_search (the QR code plugin sits at 12_generate_qr_code), so "13" and "14" put the
--- count and the rating last: side by side on a row of their own when the number of other buttons
--- is even.
-local COUNT_SLOT = "13_word_count"
-local RATING_SLOT = "14_line_length"
-local RATING_ID = "wordcount_rating"
+-- The highlight dialog lists its buttons sorted by this key. The built-in ones run from
+-- 01_select to 12_search (the QR code plugin sits at 12_generate_qr_code), so "13" puts ours last:
+-- alone on a full-width row when the number of other buttons is even.
+local SLOT = "13_line_length"
+local BUTTON_ID = "wordcount_line_length"
 
 local LABELS = {
     too_long = _("Too long"),
@@ -62,10 +61,10 @@ local function legend()
     return table.concat(lines, "\n")
 end
 
-local function showBreakdown(c)
+local function showDetails(c)
     UIManager:show(InfoMessage:new{
-        text = T(_("Words: %1\nCharacters, with spaces: %2\nCharacters, without spaces: %3"),
-                n(c.words), n(c.chars), n(c.chars_no_spaces))
+        text = T(_("Characters, with spaces: %1\nCharacters, without spaces: %2\nWords: %3"),
+                n(c.chars), n(c.chars_no_spaces), n(c.words))
             .. "\n\n" .. _("Characters per line (select one line):") .. "\n" .. legend(),
     })
 end
@@ -80,27 +79,36 @@ end
 
 -- A dialog button has no text-colour option (ButtonTable forwards a fixed list of fields), so once
 -- the dialog exists we reach the button through ButtonDialog.buttontable.button_by_id and set the
--- colour of its label, which TextWidget reads when it paints. Anything unexpected leaves the text
--- in the standard colour.
+-- colour of its label, which TextWidget reads when it paints.
+--
+-- Setting the colour is not enough on a colour e-ink screen: the dialog is drawn with a "ui"
+-- refresh, and on Kaleido screens that waveform never shows colour (the framebuffer driver only
+-- switches to a colour waveform for "partial" or "full" refreshes that carry the dither flag).
+-- So the button is also redrawn with a dithered "partial" refresh, which uses the colour REAGL waveform.
 local function tint(highlight, tier)
     local r, g, b = Rating.parseHex(tier.color)
     local dialog = highlight and highlight.highlight_dialog
     local button_table = dialog and dialog.buttontable
-    local button = button_table and button_table.button_by_id and button_table.button_by_id[RATING_ID]
+    local button = button_table and button_table.button_by_id and button_table.button_by_id[BUTTON_ID]
     local label = button and button.label_widget
     if not (r and label) then
-        logger.dbg("wordcount: could not colour the rating button")
+        logger.warn("wordcount: could not colour the button: dialog or button not found")
         return
     end
     label.fgcolor = Blitbuffer.ColorRGB32(r, g, b, 0xFF)
     if label.update then -- a TextBoxWidget needs a redraw to take the new colour
         label:update()
     end
-    -- Normally this runs before the dialog's first paint. If it already painted, redraw the button.
-    local dimen = button.dimen
-    if dimen and dimen.x and dimen.y then
-        UIManager:setDirty(dialog, "ui", dimen)
+    local region = button.dimen
+    if not (region and region.x and region.y) then
+        region = dialog.dimen
     end
+    local refreshed = region and region.x and region.y
+    if refreshed then
+        UIManager:setDirty(dialog, "partial", region, true)
+    end
+    logger.info("wordcount: coloured the line length button", tier.id, tier.color,
+        refreshed and "refreshed" or "no region to refresh")
 end
 
 function WordCount:init()
@@ -109,20 +117,13 @@ function WordCount:init()
         return
     end
 
-    self.ui.highlight:addToHighlightDialog(COUNT_SLOT, function(this)
-        local c = countSelection(this)
-        return {
-            text = T(_("Words: %1 · Chars: %2"), n(c.words), n(c.chars)),
-            callback = function() showBreakdown(c) end,
-        }
-    end)
-
-    self.ui.highlight:addToHighlightDialog(RATING_SLOT, function(this)
+    self.ui.highlight:addToHighlightDialog(SLOT, function(this)
         local c = countSelection(this)
         local tier = Rating.forChars(c.chars)
         if tier.color and colorEnabled() then
-            -- Runs after the dialog has been built from the buttons returned here.
-            UIManager:nextTick(function()
+            -- Two ticks from now: the dialog has been built from the button returned below and
+            -- painted once, so the button exists and has a position on screen.
+            UIManager:tickAfterNext(function()
                 local ok, err = pcall(tint, this, tier)
                 if not ok then
                     logger.warn("wordcount: colouring failed:", err)
@@ -130,9 +131,9 @@ function WordCount:init()
             end)
         end
         return {
-            id = RATING_ID,
-            text = LABELS[tier.id],
-            callback = function() showBreakdown(c) end,
+            id = BUTTON_ID,
+            text = T(_("Line: %1 chars · %2"), n(c.chars), LABELS[tier.id]),
+            callback = function() showDetails(c) end,
         }
     end)
 end
