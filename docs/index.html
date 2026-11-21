@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Line Length for KOReader</title>
+<meta name="description" content="A KOReader plugin that counts the characters on a line of your book and rates it from Short to Too long, so you can set the margins and the text size without leaving your e-reader.">
+<meta name="color-scheme" content="light dark">
+<link rel="canonical" href="https://charliechin.github.io/linelength.koplugin/">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Line Length for KOReader">
+<meta property="og:description" content="Counts the characters on a line of your book and rates it from Short to Too long.">
+<meta property="og:url" content="https://charliechin.github.io/linelength.koplugin/">
+<meta property="og:image" content="https://charliechin.github.io/linelength.koplugin/social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d1b17'/%3E%3Cpath d='M7 11h18M7 16h18M7 21h11' stroke='%23f6f2e9' stroke-width='2.5' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='21' r='2.2' fill='%23E69F00'/%3E%3C/svg%3E">
+
+<script>
+  /* Set the saved theme and mark JavaScript as available before the first paint. */
+  (function () {
+    var d = document.documentElement;
+    d.classList.add('js');
+    try {
+      var t = localStorage.getItem('ll-theme');
+      if (t === 'light' || t === 'dark') d.dataset.theme = t;
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="site" id="top">
+  <div class="wrap bar">
+    <a class="brand" href="#top" aria-label="Line Length, back to the top">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" class="brand-bg"/><path d="M7 11h18M7 16h18M7 21h11" class="brand-lines" stroke-width="2.5" stroke-linecap="round"/><circle cx="25" cy="21" r="2.2" fill="#E69F00"/></svg>
+      <span>Line Length</span>
+    </a>
+    <nav aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#ranges">Ranges</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/Charliechin/linelength.koplugin">GitHub<span aria-hidden="true"> &#8599;</span></a>
+      <button class="theme" id="theme" type="button" aria-label="Switch between light and dark">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- Hero: one idea, with a working demo of it -->
+  <section class="hero wrap">
+    <div class="hero-copy">
+      <p class="eyebrow">A plugin for KOReader</p>
+      <h1>Is that line too long to&nbsp;read?</h1>
+      <p class="lede">Line Length counts the characters on a line of your book and rates it from <em>Short</em> to <em>Too long</em>. Change the margins and the text size until it reads <em>Excellent</em>, without leaving your e-reader.</p>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/Charliechin/linelength.koplugin/releases/latest">Download the plugin</a>
+        <a class="btn" href="https://github.com/Charliechin/linelength.koplugin">View on GitHub</a>
+      </div>
+      <p class="fine">Tried on a Kobo Libra Colour with KOReader v2026.07.2. Free software, AGPL-3.0-or-later.</p>
+    </div>
+
+    <div class="hero-demo">
+      <div class="demo" id="demo" data-band="short">
+        <h2 class="sr-only">Try it: a page of text with the same controls</h2>
+
+        <div class="readout">
+          <div class="count-block">
+            <span class="count" id="count">&ndash;</span>
+            <span class="count-label">characters in the longest line</span>
+          </div>
+          <span class="verdict"><i class="dot" aria-hidden="true"></i><span id="verdict">&hellip;</span></span>
+        </div>
+
+        <p class="sr-only" id="live" role="status"></p>
+
+        <div class="meter" aria-hidden="true">
+          <span class="seg s-short"></span><span class="seg s-excellent"></span><span class="seg s-comfortable"></span><span class="seg s-readable"></span><span class="seg s-long"></span>
+          <span class="marker" id="marker"></span>
+        </div>
+
+        <div class="page-box">
+          <div class="page" id="page">
+            <p>It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.</p>
+            <p>However little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families, that he is considered as the rightful property of some one or other of their daughters.</p>
+            <p>&ldquo;My dear Mr.&nbsp;Bennet,&rdquo; said his lady to him one day, &ldquo;have you heard that Netherfield Park is let at last?&rdquo;</p>
+            <p>Mr.&nbsp;Bennet replied that he had not.</p>
+            <p>&ldquo;But it is,&rdquo; returned she; &ldquo;for Mrs.&nbsp;Long has just been here, and she told me all about it.&rdquo;</p>
+            <p>Mr.&nbsp;Bennet made no answer.</p>
+            <p>&ldquo;Do not you want to know who has taken it?&rdquo; cried his wife impatiently.</p>
+          </div>
+        </div>
+
+        <div class="controls">
+          <label class="ctl">
+            <span class="ctl-name">Margins</span>
+            <input id="margins" type="range" min="0" max="16" step="0.5" value="0">
+          </label>
+          <div class="ctl">
+            <span class="ctl-name" id="size-name">Text size</span>
+            <div class="stepper" role="group" aria-labelledby="size-name">
+              <button type="button" id="smaller" aria-label="Smaller text">&minus;</button>
+              <button type="button" id="larger" aria-label="Larger text">+</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="demo-note">Drag the margins to see the longest line change. The page is Jane Austen, <i>Pride and Prejudice</i> (1813, public domain), from Standard Ebooks. This is a demo in your browser, not the plugin.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works: the real screenshots, one step each -->
+  <section class="how wrap" id="how">
+    <header class="section-head reveal">
+      <h2>How it works</h2>
+      <p>Two ways in: one line you select, or the whole page.</p>
+    </header>
+
+    <ol class="steps">
+      <li class="step">
+        <div class="step-text reveal">
+          <span class="step-n" aria-hidden="true">1</span>
+          <h3>Select a line</h3>
+          <p>Long-press the first word of a line and drag to the end of it. The highlight dialog gets one extra button, here <code>Line: 56 chars &middot; Excellent</code>. Tap it.</p>
+        </div>
+        <figure class="shot reveal" style="--d:120ms">
+          <div class="frame"><img src="selection-dialog.png" width="800" height="1063" loading="lazy" alt="The selection dialog in KOReader with an extra last button reading Line: 56 chars, Excellent"></div>
+          <figcaption>Screenshot from a Kobo Libra Colour.</figcaption>
+        </figure>
+      </li>
+
+      <li class="step">
+        <div class="step-text reveal">
+          <span class="step-n" aria-hidden="true">2</span>
+          <h3>Read the verdict</h3>
+          <p>The card shows the count with and without spaces, the word count and the four ranges, with yours marked. In justified text the lines differ by a few characters, so check two or three.</p>
+        </div>
+        <figure class="shot reveal" style="--d:120ms">
+          <div class="frame"><img src="details-card.png" width="800" height="1063" loading="lazy" alt="The details card: 56 characters, Excellent, counts with and without spaces, words, and the four ranges"></div>
+          <figcaption>Screenshot from a Kobo Libra Colour.</figcaption>
+        </figure>
+      </li>
+
+      <li class="step">
+        <div class="step-text reveal">
+          <span class="step-n" aria-hidden="true">3</span>
+          <h3>Check the whole page</h3>
+          <p>Open the Typeset menu and tap <b>Line length: this page</b>. It is also in KOReader's gesture list. The verdict is the longest line's, not an average: the last line of every paragraph is short, so an average would say more about the paragraphs than about the lines.</p>
+        </div>
+        <figure class="shot reveal" style="--d:120ms">
+          <div class="frame"><img src="menu-item.png" width="800" height="1063" loading="lazy" alt="KOReader's Typeset menu with the last item, Line length: this page, highlighted"></div>
+          <figcaption>Screenshot from a Kobo Libra Colour.</figcaption>
+        </figure>
+      </li>
+
+      <li class="step">
+        <div class="step-text reveal">
+          <span class="step-n" aria-hidden="true">4</span>
+          <h3>Adjust until it reads Excellent</h3>
+          <p>The page card lists the three longest lines. The Margins and Text size steppers change the layout, and a tap shrinks the card so you can watch the page. <b>Accept</b> keeps the change. <b>Cancel</b> puts the margins and the text size back. In landscape the card has two columns so it fits the screen.</p>
+        </div>
+        <figure class="shot reveal" style="--d:120ms">
+          <div class="frame"><img src="page-card-controls.png" width="800" height="1063" loading="lazy" alt="The page card: 70 characters in the longest line, Comfortable, the three longest lines L5, L12 and L23 with 70, 66 and 64 characters, the four ranges, the Margins and Text size steppers at 10 and 22, and Cancel and Done buttons"></div>
+          <figcaption>Drawn by a desktop build of KOReader at the Libra Colour's size, with sample text.</figcaption>
+        </figure>
+      </li>
+    </ol>
+  </section>
+
+  <!-- The ranges -->
+  <section class="ranges wrap" id="ranges">
+    <header class="section-head reveal">
+      <h2>What the ranges mean</h2>
+      <p>Characters per line, spaces and punctuation included. The bands come from print typography and accessibility guidance. They are guidelines, and the sources do not agree to the character.</p>
+    </header>
+
+    <div class="ruler reveal" role="img" aria-label="A scale of characters per line: under 50 is Short, 50 to 66 Excellent, 67 to 75 Comfortable, 76 to 80 Still readable, 81 and more Too long">
+      <div class="ruler-bar">
+        <span class="seg s-short"></span><span class="seg s-excellent"></span><span class="seg s-comfortable"></span><span class="seg s-readable"></span><span class="seg s-long"></span>
+      </div>
+      <div class="ruler-ticks" aria-hidden="true">
+        <span style="left:0%">0</span><span style="left:50%">50</span><span style="left:67%">67</span><span style="left:76%">76</span><span style="left:81%">81</span>
+      </div>
+    </div>
+
+    <div class="table-wrap reveal">
+      <table>
+        <caption class="sr-only">The five ranges and where they come from</caption>
+        <thead><tr><th scope="col">Characters</th><th scope="col">Verdict</th><th scope="col">Basis</th></tr></thead>
+        <tbody>
+          <tr><td>under 50</td><td><i class="dot d-short" aria-hidden="true"></i>Short</td><td>Below the 50 where Baymard and Ruder start</td></tr>
+          <tr><td>50&ndash;66</td><td><i class="dot d-excellent" aria-hidden="true"></i>Excellent</td><td>Ruder's 50&ndash;60 up to the 66 Bringhurst calls ideal</td></tr>
+          <tr><td>67&ndash;75</td><td><i class="dot d-comfortable" aria-hidden="true"></i>Comfortable</td><td>Inside Bringhurst's 45&ndash;75 and Baymard's 50&ndash;75, past the ideal</td></tr>
+          <tr><td>76&ndash;80</td><td><i class="dot d-readable" aria-hidden="true"></i>Still readable</td><td>Past 75, within the 80 of WCAG 1.4.8</td></tr>
+          <tr><td>81 and more</td><td><i class="dot d-long" aria-hidden="true"></i>Too long</td><td>Over the 80 of WCAG 1.4.8</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="two reveal">
+      <p>These are for one column of Latin text. Bringhurst gives 40 to 50 for two columns, so a good two-column line shows as Short, and WCAG gives 40 glyphs for Chinese, Japanese and Korean.</p>
+      <p>On a colour screen with KOReader's colour rendering on, the plugin draws the verdict in the Okabe&ndash;Ito palette, which stays distinguishable with common forms of colour blindness. Otherwise it uses the normal text colour.</p>
+    </div>
+
+    <p class="sources reveal">Sources:
+      <a href="http://webtypography.net/2.1.2">Bringhurst, <i>The Elements of Typographic Style</i>, 2.1.2</a>,
+      <a href="https://baymard.com/research-articles/line-length-readability">Baymard Institute, Readability: The Optimal Line Length</a>,
+      <a href="https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation.html">W3C, Success Criterion 1.4.8</a>.
+    </p>
+  </section>
+
+  <!-- Why, short -->
+  <section class="why wrap">
+    <h2 class="reveal">Why this exists</h2>
+    <p class="reveal">I wanted the lines of a book to land in the recommended range of characters per line. KOReader has no way to show that number, so I used to retype a line into a word counter, read off the characters, go back to the e-reader, change a setting and start again. This does the counting where the text is.</p>
+  </section>
+
+  <!-- Install -->
+  <section class="install wrap" id="install">
+    <header class="section-head reveal">
+      <h2>Install</h2>
+    </header>
+    <div class="install-grid">
+      <ol class="install-steps reveal">
+        <li>Download <code>linelength.koplugin.zip</code> from the <a href="https://github.com/Charliechin/linelength.koplugin/releases/latest">latest release</a> and extract it.</li>
+        <li>Copy the <code>linelength.koplugin</code> folder into KOReader's plugins folder (on a Kobo, <code>.adds/koreader/plugins/</code>) and restart KOReader.</li>
+      </ol>
+      <div class="install-notes reveal">
+        <p>It works in books that reflow (EPUB, FB2 and the like), not in a PDF or a comic. The number is for one page: dialogue, indents and headings have other line lengths, so an Excellent line is a good start, not a guarantee.</p>
+        <p>It should work wherever KOReader runs, in black and white on a screen without colour, but only a Kobo Libra Colour (firmware 4.45, KOReader v2026.07.2) has been tried.</p>
+        <p>Storefront, the plugin browser for KOReader, lists it too.</p>
+        <p><b>Upgrading from Word count?</b> Before version 0.7.0 this plugin was called Word count, in a folder named <code>wordcount.koplugin</code>. Delete that folder before you copy the new one, or both load and everything shows up twice.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap foot">
+    <p><a href="https://github.com/Charliechin/linelength.koplugin">Source on GitHub</a> &middot; <a href="https://github.com/Charliechin/linelength.koplugin/releases">Releases</a> &middot; <a href="https://github.com/Charliechin/linelength.koplugin/blob/main/LICENSE">AGPL-3.0-or-later</a></p>
+    <p>Thanks to the reddit user <a href="https://www.reddit.com/user/Zanzel_Melancthones">Zanzel_Melancthones</a> for the suggestion to implement it this way.</p>
+    <p class="fine">This page sets no cookies and loads nothing from other sites. The theme switch remembers your choice in this browser only. GitHub hosts the page.</p>
+  </div>
+</footer>
+
+</body>
+</html>
