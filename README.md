@@ -4,6 +4,8 @@ Shows how many characters are on a line of your book and whether that is a good 
 **Excellent**, **Comfortable**, **Still readable** or **Too long**. Change the font size and the margins until
 the line reads Excellent, without leaving the e-reader.
 
+There is a [project page](https://charliechin.github.io/linelength.koplugin/) with a demo you can try in the browser.
+
 - **Select a line.** The highlight dialog gets one extra button, `Line: 58 chars · Excellent`. Tap it for the details.
 - **The whole page.** *Line length: this page* in the Typeset menu rates the longest lines on the page and has
   steppers for the margins and the text size, so you can adjust until it reads Excellent.
