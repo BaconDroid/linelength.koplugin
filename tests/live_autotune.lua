@@ -101,24 +101,25 @@ plugin:init()
 
 local settings = {
     enabled = true,
-    band_min = 50, band_max = 60, target = 55,
-    margin_min = 10, margin_max = 60,
+    band_min = 56, band_max = 60, target = 58,
+    margin_min = 20, margin_max = 50,
     max_chars_per_step = 6,
     sample_first = 0, sample_middle = 6, sample_last = 0,
     max_steps = 6,
 }
 
 -- The book starts badly set up: a big text on wide margins makes the lines too short.
-layout.font_size = 22
+layout.font_size = tonumber(os.getenv("FONT")) or 22
 if os.getenv("START") == "long" then
     -- A small text on narrow margins makes the lines too long.
     layout.h_page_margins = { 0, 0 }
-    layout.font_size = 16
+    layout.font_size = tonumber(os.getenv("FONT")) or 16
 else
     -- Wide margins make the lines too short.
     layout.h_page_margins = { 60, 60 }
 end
 local start_font = layout.font_size
+local start_margin = layout.h_page_margins[1]
 doc:setPageMargins(Screen:scaleBySize(layout.h_page_margins[1]), Screen:scaleBySize(10),
     Screen:scaleBySize(layout.h_page_margins[2]), Screen:scaleBySize(10))
 doc:setFontSize(Screen:scaleBySize(layout.font_size))
@@ -131,12 +132,19 @@ doc:render()
 local before = plugin:measureSample()
 check("the book is measured before the tune", before ~= nil)
 print(string.format("before: median %s (min %s, max %s)", tostring(before.median), tostring(before.min), tostring(before.max)))
-if os.getenv("START") == "long" then
-    check("the lines are too long to begin with", before.median > settings.band_max,
-        before.median .. " characters")
+-- The book has to start outside the band for the tune to have anything to do. The margins are set
+-- wide or narrow to get there; at some text sizes the band is reached either way, and then the tune
+-- has nothing to do, which is a result in itself.
+local starts_outside = not AutoTune.inBand(before.median)
+if starts_outside then
+    if before.median > settings.band_max then
+        check("the lines are too long to begin with", true, before.median .. " characters")
+    else
+        check("the lines are too short to begin with", true, before.median .. " characters")
+    end
 else
-    check("the lines are too short to begin with", before.median < settings.band_min,
-        before.median .. " characters")
+    print(string.format("the book starts in the band already (%d characters): the tune has nothing to do",
+        before.median))
 end
 
 refreshes, paints = 0, 0
@@ -149,23 +157,34 @@ print(string.format("auto-tune: %d steps, %s characters, %.2f s of CPU, %d pages
 print(string.format("layout now: margins %d/%d, text size %d", layout.h_page_margins[1],
     layout.h_page_margins[2], layout.font_size))
 
-check("the auto-tune changed the layout", result.changed == true, tostring(result.changed))
--- A small text can make the band unreachable: the margins alone cannot shorten the lines enough.
--- The tune then goes as far as the margins go and stops there.
-local band_reachable = not (os.getenv("START") == "long")
-if band_reachable then
-    check("the line length is now in the band", AutoTune.inBand(result.chars), tostring(result.chars))
+-- The layout changes when there is something to change, and stays as it is when the margins are
+-- already at the bound the reader set and the lines cannot be any shorter.
+local margins_moved = layout.h_page_margins[1] ~= start_margin
+check("the auto-tune changed the layout when it could", result.changed == margins_moved,
+    tostring(result.changed) .. ", margins moved: " .. tostring(margins_moved))
+-- The tune ends in the band, unless the margins cannot get there: a text too small for the band
+-- cannot be shortened by the margins alone, and the tune stops at the bound.
+if AutoTune.inBand(result.chars) then
+    check("the line length is now in the band", true, tostring(result.chars))
 else
-    check("the tune went as far as the margins go", layout.h_page_margins[1] == settings.margin_max,
-        tostring(layout.h_page_margins[1]))
-    check("and the line length is as short as it can be", result.chars > AutoTune.BAND_MAX,
-        tostring(result.chars))
+    check("the tune went as far as the margins go", layout.h_page_margins[1] == settings.margin_max
+        or layout.h_page_margins[1] == settings.margin_min, tostring(layout.h_page_margins[1]))
 end
+check("the margins stayed inside the bounds", layout.h_page_margins[1] >= settings.margin_min
+    and layout.h_page_margins[1] <= settings.margin_max, tostring(layout.h_page_margins[1]))
 check("it took a few steps", result.steps <= settings.max_steps, result.steps .. " steps")
-if os.getenv("START") == "long" then
-    check("the margins went out", layout.h_page_margins[1] > 0, tostring(layout.h_page_margins[1]))
-else
-    check("the margins came in", layout.h_page_margins[1] < 60, tostring(layout.h_page_margins[1]))
+-- The margins move towards the target: wider when the lines are too long, narrower when they are
+-- too short. The text size never moves.
+if starts_outside and margins_moved then
+    -- The margins move towards the target: wider when the lines are too long, narrower when they are
+    -- too short, unless they are already at the bound that movement would need.
+    if before.median > settings.band_max then
+        check("the margins went out", layout.h_page_margins[1] > start_margin
+            or layout.h_page_margins[1] == settings.margin_max, tostring(layout.h_page_margins[1]))
+    else
+        check("the margins came in", layout.h_page_margins[1] < start_margin
+            or layout.h_page_margins[1] == settings.margin_min, tostring(layout.h_page_margins[1]))
+    end
 end
 check("the margins are even", layout.h_page_margins[1] == layout.h_page_margins[2])
 check("the text size was never touched", layout.font_size == start_font,

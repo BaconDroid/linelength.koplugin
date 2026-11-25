@@ -484,6 +484,19 @@ function LineLength:autoTune(settings)
     -- The calculation starts from the margin the book really has, even when it is outside the bounds:
     -- the measurement was taken at that margin, and it is what the next step has to answer for.
     local margin = tonumber(layout.margins[1]) or AutoTune.MARGIN_MIN
+    -- A margin outside the bounds comes back inside them, even when the lines are already in the band:
+    -- the bounds are what the reader asked for, and a margin of zero or a huge one is not what they want.
+    if margin < limits.margin_min or margin > limits.margin_max then
+        margin = math.max(limits.margin_min, math.min(limits.margin_max, margin))
+        self:applyLayout({ margin, margin }, nil)
+        changed = true
+        steps = steps + 1
+        local again = self:measureSample(counts)
+        if not again then
+            return { steps = steps, chars = chars, changed = changed, margin = margin }
+        end
+        chars = again.median
+    end
 
     while not AutoTune.inBand(chars) and steps < max_steps do
         local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
