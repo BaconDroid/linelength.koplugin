@@ -548,55 +548,47 @@ function LineLength:autoTune(settings)
         return nil
     end
     local chars = sample.median
-    local steps, changed, verified = 0, false, true
+    local steps, changed = 0, false
     local layout = self:currentLayout()
     if not layout then
         return nil
     end
-    -- The two margins are the white space around the text, and the text block is what the lines are
-    -- laid out in: the step works on the average of the two, so that an uneven layout is measured
-    -- on the width it really has.
+    -- The step works on the average of the two margins, so that an uneven layout is measured on the
+    -- width it really has. Both margins are looked at: one of them out of the bounds is enough to pull
+    -- the layout back in, even when the lines are already in the band.
     local left = tonumber(layout.margins[1]) or AutoTune.MARGIN_MIN
     local right = tonumber(layout.margins[2]) or left
-    local margin = (left + right) / 2
-    -- A margin outside the bounds comes back inside them, even when the lines are already in the band:
-    -- the bounds are what the reader asked for, and a margin of zero or a huge one is not what they want.
-    -- Both margins are looked at: one of them out of the bounds is enough to pull the layout back in.
-    if left < limits.margin_min or left > limits.margin_max
-        or right < limits.margin_min or right > limits.margin_max then
-        margin = math.max(limits.margin_min, math.min(limits.margin_max, margin))
-        self:applyLayout({ margin, margin }, nil)
-        changed = true
-        steps = steps + 1
-        local again = self:measureSample(counts)
-        if not again then
-            -- The new layout could not be measured: the count of the old one says nothing about the
-            -- book any more, so no count is reported.
-            return { steps = steps, chars = nil, changed = changed, margin = margin }
-        end
-        chars = again.median
-    end
+    local margin = AutoTune.startMargin((left + right) / 2, limits)
+    local inside = left >= limits.margin_min and left <= limits.margin_max
+        and right >= limits.margin_min and right <= limits.margin_max
 
-    while not AutoTune.inBand(chars, limits) and steps < max_steps do
-        local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
-        if not next_margin then
-            break -- nothing more can be tried: the book is as good as it can get
-        end
+    -- Lays the book out at a margin and measures it again, so that the count belongs to the layout
+    -- that is on the page: nil when the new layout could not be read, and the count of the old one
+    -- then says nothing about the book any more.
+    local function moveTo(next_margin)
         self:applyLayout({ next_margin, next_margin }, nil)
         margin = next_margin
         changed = true
         steps = steps + 1
         local again = self:measureSample(counts)
         if not again then
-            verified = false -- the new layout could not be measured: the count is not the book's any more
-            break
+            return nil
         end
         chars = again.median
+        return chars
     end
-    if not verified then
-        -- The margins were moved but the book could not be measured again: the count of the old
-        -- layout would be reported for a layout that is not there any more, so no count is reported.
+
+    if not inside and not moveTo(margin) then
         return { steps = steps, chars = nil, changed = changed, margin = margin }
+    end
+    while not AutoTune.inBand(chars, limits) and steps < max_steps do
+        local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
+        if not next_margin then
+            break -- nothing more can be tried: the book is as good as it can get
+        end
+        if not moveTo(next_margin) then
+            return { steps = steps, chars = nil, changed = changed, margin = margin }
+        end
     end
     return { steps = steps, chars = chars, changed = changed, margin = margin }
 end

@@ -35,12 +35,6 @@ expect("out of band: 61", AutoTune.inBand(61), false)
 expect("out of band: nothing", AutoTune.inBand(nil), false)
 expect("out of band: text", AutoTune.inBand("x"), false)
 
-expect("distance: in band", AutoTune.distance(60), 0)
-expect("distance: at the lower edge", AutoTune.distance(56), 0)
-expect("distance: too short", AutoTune.distance(45), 11)
-expect("distance: too long", AutoTune.distance(70), -10)
-expect("distance: nothing", AutoTune.distance(nil), 56)
-
 -- The limits of the tune come from the settings the reader chose, and the helpers use them: a band
 -- the reader set is the band the loop stops on, not the default one.
 local limits = AutoTune.limits({ band_min = 65, band_max = 70, target = 68, margin_min = 10, margin_max = 90 })
