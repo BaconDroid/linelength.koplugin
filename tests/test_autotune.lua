@@ -41,6 +41,38 @@ expect("distance: too short", AutoTune.distance(45), 11)
 expect("distance: too long", AutoTune.distance(70), -10)
 expect("distance: nothing", AutoTune.distance(nil), 56)
 
+-- The limits of the tune come from the settings the reader chose, and the helpers use them: a band
+-- the reader set is the band the loop stops on, not the default one.
+local limits = AutoTune.limits({ band_min = 65, band_max = 70, target = 68, margin_min = 10, margin_max = 90 })
+expect("the band from the settings", limits.band_min, 65)
+expect("the band from the settings", limits.band_max, 70)
+expect("the target from the settings", limits.target, 68)
+expect("the margins from the settings", limits.margin_min, 10)
+expect("the margins from the settings", limits.margin_max, 90)
+expect("in the band the reader asked for", AutoTune.inBand(68, limits), true)
+expect("out of the band the reader asked for", AutoTune.inBand(61, limits), false)
+expect("out of the band the reader asked for", AutoTune.inBand(71, limits), false)
+expect("the defaults without settings", AutoTune.limits().band_min, AutoTune.BAND_MIN)
+expect("the defaults without settings", AutoTune.limits().margin_max, AutoTune.MARGIN_MAX)
+
+-- The reader can leave a pair the wrong way round in the settings file: the shortest line cannot be
+-- longer than the longest one, and the smallest margin cannot be bigger than the biggest one, so
+-- the pair is put the right way round.
+local swapped = AutoTune.limits({ band_min = 80, band_max = 30, margin_min = 140, margin_max = 0 })
+expect("the band is put the right way round", swapped.band_min, 30)
+expect("the band is put the right way round", swapped.band_max, 80)
+expect("the margins are put the right way round", swapped.margin_min, 0)
+expect("the margins are put the right way round", swapped.margin_max, 140)
+expect("equal ends are left alone", AutoTune.limits({ band_min = 60, band_max = 60 }).band_min, 60)
+
+-- The step aims at the band the reader asked for, not at the default one: with a band of 65 to 70
+-- and a target of 68, the lines are made longer towards 68, and the margins come in. With the
+-- default band of 56 to 60 the same lines would go the other way, towards 58.
+local aimed_band = AutoTune.nextMargin(30, 72, WIDTH, limits)
+expect("the step aims at the band of the reader", aimed_band > 30, true)
+expect("the step aims at the band of the reader, not at the default one",
+    aimed_band < AutoTune.nextMargin(30, 72, WIDTH), true)
+
 local wider = AutoTune.nextMargin(10, 80, WIDTH)
 expect("too long: the margins widen", wider > 10, true)
 expect("too long: by at least a step", wider >= 12, true)
@@ -64,10 +96,20 @@ local big_step = AutoTune.nextMargin(40, 54, WIDTH, { max_chars_per_step = 20, t
 expect("a bigger step moves further", big_step < small_step, true)
 expect("a small step moves a little", small_step > 20, true)
 
--- The lines are far too long: the margins go as far as they can, and there is nothing more to try.
+-- The lines are far too long for the band: the step is capped, so the margins move towards the band
+-- a step at a time, they end at their bound, and there is nothing more to try.
 local wanted = AutoTune.nextMargin(20, 80, WIDTH)
-expect("the margins go to their bound", wanted, 50)
-expectNil("and then there is nothing more to try", AutoTune.nextMargin(wanted, 80, WIDTH))
+expect("the step moves towards the band", wanted > 20, true)
+expect("the step stays inside the bounds", wanted <= AutoTune.MARGIN_MAX, true)
+local bound, bound_steps = 20, 0
+while bound_steps < 20 do
+    local next_margin = AutoTune.nextMargin(bound, 80, WIDTH)
+    if not next_margin then break end
+    bound = next_margin
+    bound_steps = bound_steps + 1
+end
+expect("the margins go to their bound", bound, AutoTune.MARGIN_MAX)
+expectNil("and then there is nothing more to try", AutoTune.nextMargin(bound, 80, WIDTH))
 
 expectNil("no margin", AutoTune.nextMargin(nil, 60, WIDTH))
 expectNil("no measurement", AutoTune.nextMargin(10, 0, WIDTH))
@@ -92,17 +134,19 @@ local function chars_in(block)
     return math.floor(block * 59 / 612 + 0.5)
 end
 
-local function simulate(start_margin, measured)
+local function simulate(start_margin, measured, chars_at_margin)
+    chars_at_margin = chars_at_margin or chars_in
     local margin = AutoTune.startMargin(start_margin)
-    local steps = 0
+    local steps, inside = 0, true
     while not AutoTune.inBand(measured) and steps < 20 do
         local next_margin = AutoTune.nextMargin(margin, measured, WIDTH)
         if not next_margin then break end
         margin = next_margin
         steps = steps + 1
-        measured = chars_in(WIDTH - 2 * margin)
+        measured = chars_at_margin(WIDTH - 2 * margin)
+        inside = inside and margin >= AutoTune.MARGIN_MIN and margin <= AutoTune.MARGIN_MAX
     end
-    return margin, measured, steps
+    return margin, measured, steps, inside
 end
 
 -- The step aims at the target: the same book, a different target, a different margin.
@@ -123,22 +167,32 @@ expectNil("already at the target: nothing to try", AutoTune.nextMargin(20, 58, W
 
 -- The margins come in when the lines are too short, and widen when they are too long.
 expect("too short: the margins come in", AutoTune.nextMargin(40, 45, WIDTH, { target = 55 }), 20)
-expect("too long: the margins widen", AutoTune.nextMargin(20, 70, WIDTH, { target = 55 }), 50)
+expect("too long: the margins widen", AutoTune.nextMargin(20, 70, WIDTH, { target = 55 }), 45)
 
-local margin, chars, steps = simulate(10, 80)
+local margin, chars, steps, inside = simulate(10, 80)
 expect("the loop ends in the band", AutoTune.inBand(chars), true)
 expect("the loop ends in a few steps", steps <= 3, true)
 expect("the loop widened the margins", margin > 10, true)
-expect("the loop stayed inside the bounds", margin <= 60, true)
+expect("every step stayed inside the bounds", inside, true)
 
-local margin2, chars2, steps2 = simulate(60, 40)
+local margin2, chars2, steps2, inside2 = simulate(60, 40)
 expect("the loop ends in the band from the other side", AutoTune.inBand(chars2), true)
 expect("the loop brought the margins in", margin2 < 60, true)
 expect("the loop ends in a few steps there too", steps2 <= 3, true)
+expect("every step stayed inside the bounds there either", inside2, true)
 
--- A book whose lines cannot reach the band at any margin: the loop stops instead of going for ever.
-local margin3, chars3, steps3 = simulate(60, 90)
-expect("an unreachable band stops the loop", steps3 < 20, true)
+-- A book whose lines cannot reach the band at any margin: the loop makes progress, stops at the
+-- bound of the margins, and the lines stay outside the band.
+-- The first count comes from the same relation the later counts come from, so that the loop really
+-- walks through the margins instead of starting on a count no margin could have given.
+local function long_chars_in(block)
+    return math.floor(block * 70 / 612 + 0.5)
+end
+local start = 35
+local margin3, chars3, steps3 = simulate(start, long_chars_in(WIDTH - 2 * start), long_chars_in)
+expect("an unreachable band still moves the margins", steps3 > 0, true)
+expect("an unreachable band stops at the bound", margin3, AutoTune.MARGIN_MAX)
+expect("an unreachable band leaves the lines outside it", AutoTune.inBand(chars3), false)
 
 if failures > 0 then
     error(failures .. " autotune test(s) failed")
