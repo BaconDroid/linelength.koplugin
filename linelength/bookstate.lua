@@ -57,11 +57,13 @@ function BookState.markTuned(ui)
     if not doc_settings then
         return false
     end
-    local ok = pcall(function()
+    local ok, value = pcall(function()
         doc_settings:saveSetting(BookState.KEY, true)
-        doc_settings:flush()
+        -- The flush gives back where it wrote the settings, and nothing when the sidecar file could
+        -- not be opened: the flag is then not on disk and the book would be tuned again.
+        return doc_settings:flush()
     end)
-    return ok == true
+    return ok == true and value ~= nil
 end
 
 --- Forgets that the book has been tuned, so that it is measured again.
@@ -72,11 +74,12 @@ function BookState.clearTuned(ui)
     if not doc_settings then
         return false
     end
-    local ok = pcall(function()
+    local ok, value = pcall(function()
         doc_settings:delSetting(BookState.KEY)
-        doc_settings:flush()
+        -- As in markTuned: nothing comes back when the sidecar file could not be written.
+        return doc_settings:flush()
     end)
-    return ok == true
+    return ok == true and value ~= nil
 end
 
 return BookState
