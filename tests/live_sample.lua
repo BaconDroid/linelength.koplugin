@@ -123,9 +123,11 @@ check("one widget for the wait, one for the result", #shown == 2, tostring(#show
 if message and message.text then
     print(message.text)
 end
-check("the message names a median line length", message and message.text and message.text:find("Median line: 58") ~= nil,
+check("the message names the median line length",
+    message and message.text and message.text:find("Median line: " .. sample.median .. " chars") ~= nil,
     message and message.text or "no text")
-check("the message says how many pages were read", message and message.text and message.text:find("18 of 937") ~= nil,
+check("the message says how many pages were read",
+    message and message.text and message.text:find("18 of " .. pages) ~= nil,
     message and message.text or "no text")
 print("ALL LIVE CHECKS PASSED")
 os.exit(0)

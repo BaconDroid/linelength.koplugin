@@ -1,7 +1,10 @@
+"""Build an EPUB from a novel of the local corpus, so the sample can be exercised on a real book.
+Usage: make_epub_corpus.py <corpus.json> <source> <novel> <out.epub>
+e.g.   make_epub_corpus.py ~/wm-work/corpus/corpus.json en.novelbuddy delve /tmp/delve.epub"""
 import json, sys, zipfile, html
 
-src, nid, out = sys.argv[1], sys.argv[2], sys.argv[3]
-d = json.load(open('/root/wm-work/corpus/corpus.json'))
+corpus, src, nid, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+d = json.load(open(corpus))
 novel = d[src][nid]
 chapters = sorted(novel['chapters'].items(), key=lambda kv: kv[1].get('number', 0))
 
