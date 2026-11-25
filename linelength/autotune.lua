@@ -86,7 +86,15 @@ function AutoTune.nextMargin(margin, chars, screen_width, limits)
     local step_margin = math.abs(wanted_margin - margin) <= step_width / 2 and wanted_margin
         or (wanted_margin > margin and margin + step_width / 2 or margin - step_width / 2)
     local new_margin = math.floor(step_margin + 0.5)
-    new_margin = math.max(margin_min, math.min(margin_max, new_margin))
+    -- A margin outside the bounds comes back inside them first: the bounds are what the reader asked
+    -- for, and a step that stayed outside would measure the same thing again.
+    if margin < margin_min then
+        new_margin = margin_min
+    elseif margin > margin_max then
+        new_margin = margin_max
+    else
+        new_margin = math.max(margin_min, math.min(margin_max, new_margin))
+    end
     if new_margin == margin then
         return nil
     end

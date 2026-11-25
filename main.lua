@@ -480,7 +480,9 @@ function LineLength:autoTune(settings)
     if not layout then
         return nil
     end
-    local margin = AutoTune.startMargin(layout.margins[1], limits)
+    -- The calculation starts from the margin the book really has, even when it is outside the bounds:
+    -- the measurement was taken at that margin, and it is what the next step has to answer for.
+    local margin = tonumber(layout.margins[1]) or AutoTune.MARGIN_MIN
 
     while not AutoTune.inBand(chars) and steps < max_steps do
         local next_margin = AutoTune.nextMargin(margin, chars, width, limits)

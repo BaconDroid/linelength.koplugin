@@ -77,6 +77,10 @@ expect("start: a margin inside the bounds stays", AutoTune.startMargin(25), 25)
 expect("start: a margin is rounded", AutoTune.startMargin(25.6), 26)
 expect("start: no margin at all", AutoTune.startMargin(nil), 10)
 
+-- A margin outside the bounds comes back inside them first.
+expect("a margin below the bound comes back in", AutoTune.nextMargin(0, 70, WIDTH), 10)
+expect("a margin above the bound comes back in", AutoTune.nextMargin(90, 40, WIDTH), 60)
+
 -- The loop the way the plugin runs it: the margins move by steps, each one measured, until the line
 -- length is in the band. The screen is 632 units wide.
 -- The characters a line holds, from the real relation measured on a book: a line of 59 characters
