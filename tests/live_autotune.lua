@@ -101,7 +101,7 @@ plugin:init()
 
 local settings = {
     enabled = true,
-    band_min = 50, band_max = 66, target = 60,
+    band_min = 50, band_max = 60, target = 60,
     margin_min = 10, margin_max = 60,
     max_chars_per_step = 6,
     sample_first = 0, sample_middle = 6, sample_last = 0,

@@ -21,7 +21,7 @@ end
 local WIDTH = 632
 
 expect("band min", AutoTune.BAND_MIN, 50)
-expect("band max", AutoTune.BAND_MAX, 66)
+expect("band max", AutoTune.BAND_MAX, 60)
 expect("target", AutoTune.TARGET, 60)
 expect("margin min", AutoTune.MARGIN_MIN, 10)
 expect("margin max", AutoTune.MARGIN_MAX, 60)
@@ -29,16 +29,16 @@ expect("characters per step", AutoTune.MAX_CHARS_PER_STEP, 6)
 
 expect("in band: 50", AutoTune.inBand(50), true)
 expect("in band: 60", AutoTune.inBand(60), true)
-expect("in band: 66", AutoTune.inBand(66), true)
+expect("in band: 60", AutoTune.inBand(60), true)
 expect("out of band: 49", AutoTune.inBand(49), false)
-expect("out of band: 67", AutoTune.inBand(67), false)
+expect("out of band: 61", AutoTune.inBand(61), false)
 expect("out of band: nothing", AutoTune.inBand(nil), false)
 expect("out of band: text", AutoTune.inBand("x"), false)
 
 expect("distance: in band", AutoTune.distance(60), 0)
 expect("distance: at the lower edge", AutoTune.distance(50), 0)
 expect("distance: too short", AutoTune.distance(45), 5)
-expect("distance: too long", AutoTune.distance(70), -4)
+expect("distance: too long", AutoTune.distance(70), -10)
 expect("distance: nothing", AutoTune.distance(nil), 50)
 
 local wider = AutoTune.nextMargin(10, 80, WIDTH)

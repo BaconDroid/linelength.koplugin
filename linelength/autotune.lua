@@ -13,7 +13,7 @@ local AutoTune = {}
 
 -- Where the line length should land: a band of good lengths, and the one to aim at inside it.
 AutoTune.BAND_MIN = 50
-AutoTune.BAND_MAX = 66
+AutoTune.BAND_MAX = 60
 AutoTune.TARGET = 60
 
 -- The margins the tune may use.
