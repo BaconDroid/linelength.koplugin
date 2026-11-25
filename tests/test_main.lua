@@ -127,6 +127,25 @@ local function expect(name, got, want)
     end
 end
 
+-- The plugin's own settings file, as KOReader keeps it: a table of settings, read and written as one.
+local plugin_settings = { settings = {} }
+package.preload["datastorage"] = function()
+    return { getSettingsDir = function() return "/tmp/koreader/settings" end }
+end
+package.preload["luasettings"] = function()
+    return { open = function()
+        return {
+            readSetting = function(_self, key, default)
+                local value = plugin_settings[key]
+                if value == nil then return default end
+                return value
+            end,
+            writeSetting = function(_self, key, value) plugin_settings[key] = value end,
+            flush = function() end,
+        }
+    end }
+end
+
 local LineLength = require("main")
 expect("plugin name", LineLength.name, "linelength")
 expect("only loads inside a book", LineLength.is_doc_only, true)
@@ -351,7 +370,10 @@ expect("sample menu item text", items.linelength_sample and items.linelength_sam
 expect("sample menu item goes in the Typeset menu", items.linelength_sample and items.linelength_sample.sorting_hint, "typeset")
 local item_count = 0
 for _k in pairs(items) do item_count = item_count + 1 end
-expect("two menu items", item_count, 2)
+expect("three menu items", item_count, 3)
+expect("the settings menu item", items.linelength_settings and items.linelength_settings.text, "Line length: settings")
+expect("the settings menu item goes in the Typeset menu", items.linelength_settings and items.linelength_settings.sorting_hint, "typeset")
+expect("the settings menu has a sub menu", type(items.linelength_settings and items.linelength_settings.sub_item_table_func), "function")
 expect("sample action registered", type(actions["linelength_sample"]), "table")
 expect("sample action event", actions["linelength_sample"] and actions["linelength_sample"].event, "LinelengthSample")
 expect("sample action title", actions["linelength_sample"] and actions["linelength_sample"].title,
@@ -1267,6 +1289,80 @@ local function tests_sample()
     local sp10 = sampleBook({ pages = 100, current = 1 })
     expect("sample action event", actions["linelength_sample"] and actions["linelength_sample"].event, "LinelengthSample")
     expect("sample event handler exists", type(sp10.onLinelengthSample), "function")
+
+    -- 13. the auto-tune: the settings, the switch, and the numbers in the menu.
+    local Settings = require("linelength/settings")
+    local settings = Settings:read()
+    expect("the auto-tune is off by default", settings.enabled, false)
+    expect("the band starts at 50", settings.band_min, 50)
+    expect("the band ends at 66", settings.band_max, 66)
+    expect("the target is 60", settings.target, 60)
+    expect("the text size starts at 20", settings.font_min, 20)
+    expect("the margins start at 10", settings.margin_min, 10)
+    expect("six pages in the middle", settings.sample_middle, 6)
+    expect("no pages at the start", settings.sample_first, 0)
+    expect("no pages at the end", settings.sample_last, 0)
+    expect("four steps at most", settings.max_steps, 4)
+
+    settings.enabled = true
+    Settings:write(settings)
+    expect("the settings are kept", Settings:read().enabled, true)
+    settings.enabled = false
+    Settings:write(settings)
+
+    -- The auto-tune does nothing when the reader has not asked for it.
+    local auto_plugin = LineLength:new{ document = {}, ui = { menu = newMenu(), highlight = newHighlight() } }
+    auto_plugin:init()
+    local called = false
+    auto_plugin.autoTune = function() called = true end
+    local real_read = Settings.read
+    Settings.read = function(self) return { enabled = false } end
+    auto_plugin:onReaderReady()
+    expect("the auto-tune stays off when it is not asked for", called, false)
+    Settings.read = function(self) return { enabled = true } end
+    auto_plugin:onReaderReady()
+    expect("the auto-tune runs when it is asked for", called, true)
+    Settings.read = real_read
+
+    -- The settings menu: a switch and the numbers, each with a step of one.
+    local menu = auto_plugin:settingsMenu()
+    expect("the settings menu has entries", #menu > 0, true)
+    local found_switch, found_numbers = false, 0
+    for _i, item in ipairs(menu) do
+        if item.text_func then
+            local text = item.text_func()
+            if type(text) == "string" and text:find("Auto%-tune") then
+                found_switch = true
+            end
+        end
+        if item.sub_item_table then
+            found_numbers = found_numbers + 1
+        end
+    end
+    expect("the settings menu has the switch", found_switch, true)
+    expect("the settings menu has the numbers", found_numbers >= 8, true)
+
+    -- The switch flips the setting and keeps it.
+    local before = Settings:read().enabled
+    menu[1].callback()
+    expect("the switch flips the setting", Settings:read().enabled, not before)
+    menu[1].callback()
+    expect("and flips it back", Settings:read().enabled, before)
+
+    -- A number goes up and down by one.
+    local band_item = nil
+    for _i, item in ipairs(menu) do
+        if item.sub_item_table then
+            local label = item.text_func()
+            if label:find("Longest line") then band_item = item end
+        end
+    end
+    expect("the longest line is in the menu", band_item ~= nil, true)
+    local value = Settings:read().band_max
+    band_item.sub_item_table[2].callback()
+    expect("a number goes up by one", Settings:read().band_max, value + 1)
+    band_item.sub_item_table[1].callback()
+    expect("and back down", Settings:read().band_max, value)
 end
 
 tests_sample()

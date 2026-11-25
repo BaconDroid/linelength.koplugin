@@ -22,6 +22,8 @@ local PageLines = require("linelength/pagelines")
 local Rating = require("linelength/rating")
 local Report = require("linelength/report")
 local Sample = require("linelength/sample")
+local AutoTune = require("linelength/autotune")
+local Settings = require("linelength/settings")
 
 local LineLength = WidgetContainer:extend{
     name = "linelength",
@@ -447,6 +449,75 @@ function LineLength:onControl(card, session, id)
     end
 end
 
+-- The auto-tune: measures the line length of a sample of the book and, when it is outside the band the
+-- reader asked for, changes the margins (and the text size only when the margins cannot go further)
+-- until it is inside. Every step is measured again, so the loop stops on what the book really holds.
+-- @param settings table the settings, as in linelength/settings.lua
+-- @return table|nil what happened: { steps, chars, changed } ; nil when nothing was done
+function LineLength:autoTune(settings)
+    settings = settings or {}
+    local limits = {
+        font_min = settings.font_min,
+        font_max = settings.font_max,
+        margin_min = settings.margin_min,
+        margin_max = settings.margin_max,
+    }
+    local counts = {
+        first = settings.sample_first,
+        middle = settings.sample_middle,
+        last = settings.sample_last,
+    }
+    local max_steps = settings.max_steps or 4
+    local width = screenWidthUnits()
+
+    local sample, reason = self:measureSample(counts)
+    if not sample then
+        logger.warn("linelength: could not measure the book for the auto-tune:", reason)
+        return nil
+    end
+    local chars = sample.median
+    local steps, changed = 0, false
+    local layout = self:currentLayout()
+    if not layout then
+        return nil
+    end
+    layout = AutoTune.start(layout, limits)
+
+    while not AutoTune.inBand(chars) and steps < max_steps do
+        local next_layout = AutoTune.next(layout, chars, width, limits)
+        if not next_layout then
+            break -- nothing more can be tried: the book is as good as it can get
+        end
+        self:applyLayout(next_layout.margins, next_layout.size)
+        layout = next_layout
+        changed = true
+        steps = steps + 1
+        local again = self:measureSample(counts)
+        if not again then
+            break
+        end
+        chars = again.median
+    end
+    return { steps = steps, chars = chars, changed = changed }
+end
+
+-- The auto-tune when a book opens, if the reader asked for it. It is quiet: a book that is already
+-- within the band is left alone, and nothing is shown when there was nothing to do.
+function LineLength:onReaderReady()
+    local ok, settings = pcall(function() return Settings:read() end)
+    if not ok or not settings.enabled then
+        return
+    end
+    local done_ok, result = pcall(function() return (self:autoTune(settings)) end)
+    if not done_ok then
+        logger.warn("linelength: the auto-tune failed:", result)
+        return
+    end
+    if result and result.changed then
+        logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
+    end
+end
+
 function LineLength:showPage()
     local ok, report, reason = pcall(pageReport, self.ui)
     if not ok then
@@ -532,6 +603,63 @@ function LineLength:onLinelengthPage()
     return true
 end
 
+-- The settings of the auto-tune, as a menu: a switch, and the numbers that decide what it does.
+-- Each number is a step of 1, and the menu shows what it is set to now.
+function LineLength:settingsMenu()
+    local settings = Settings:read()
+    local function save()
+        Settings:write(settings)
+    end
+    local function number(label, key, step, min, max)
+        return {
+            text_func = function()
+                return T(_("%1: %2"), label, tostring(settings[key]))
+            end,
+            keep_menu_open = true,
+            sub_item_table = {
+                {
+                    text = T(_("Less %1"), label),
+                    enabled_func = function() return settings[key] > min end,
+                    callback = function()
+                        settings[key] = math.max(min, settings[key] - step)
+                        save()
+                    end,
+                },
+                {
+                    text = T(_("More %1"), label),
+                    enabled_func = function() return settings[key] < max end,
+                    callback = function()
+                        settings[key] = math.min(max, settings[key] + step)
+                        save()
+                    end,
+                },
+            },
+        }
+    end
+    return {
+        {
+            text_func = function()
+                return settings.enabled and _("Auto-tune when a book opens: on") or _("Auto-tune when a book opens: off")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                settings.enabled = not settings.enabled
+                save()
+            end,
+        },
+        number(_("Shortest line"), "band_min", 1, 30, 80),
+        number(_("Longest line"), "band_max", 1, 30, 80),
+        number(_("Smallest text size"), "font_min", 1, 12, 40),
+        number(_("Biggest text size"), "font_max", 1, 12, 40),
+        number(_("Smallest margin"), "margin_min", 1, 0, 140),
+        number(_("Biggest margin"), "margin_max", 1, 0, 140),
+        number(_("Pages at the start"), "sample_first", 1, 0, 20),
+        number(_("Pages in the middle"), "sample_middle", 1, 1, 20),
+        number(_("Pages at the end"), "sample_last", 1, 0, 20),
+        number(_("Steps at most"), "max_steps", 1, 1, 10),
+    }
+end
+
 function LineLength:addToMainMenu(menu_items)
     menu_items.linelength_page = {
         text = _("Line length: this page"),
@@ -542,6 +670,13 @@ function LineLength:addToMainMenu(menu_items)
         text = _("Line length: this book (sample)"),
         sorting_hint = "typeset",
         callback = function() self:showSample() end,
+    }
+    menu_items.linelength_settings = {
+        text = _("Line length: settings"),
+        sorting_hint = "typeset",
+        sub_item_table_func = function()
+            return self:settingsMenu()
+        end,
     }
 end
 
