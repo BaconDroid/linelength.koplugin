@@ -127,7 +127,7 @@ check("the message names the median line length",
     message and message.text and message.text:find("Median line: " .. sample.median .. " chars") ~= nil,
     message and message.text or "no text")
 check("the message says how many pages were read",
-    message and message.text and message.text:find("18 of " .. pages) ~= nil,
+    message and message.text and message.text:find(#sample.values .. " of " .. pages) ~= nil,
     message and message.text or "no text")
 print("ALL LIVE CHECKS PASSED")
 os.exit(0)

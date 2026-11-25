@@ -301,10 +301,16 @@ function LineLength:measureSample(counts)
         return nil, "empty"
     end
     local min, max = Sample.range(values)
+    -- An even number of pages gives a median that ends in .5; a line is a whole number of characters, and
+    -- the rating floors, so the median is rounded to the nearest whole count once, here.
+    local median = Sample.median(values)
+    if median then
+        median = math.floor(median + 0.5)
+    end
     return {
         pages = measured,
         values = values,
-        median = Sample.median(values),
+        median = median,
         min = min,
         max = max,
         total = total,

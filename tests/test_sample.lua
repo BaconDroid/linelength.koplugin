@@ -31,30 +31,26 @@ local function expectList(name, got, want)
     end
 end
 
-expectList("100 pages, defaults", Sample.pages(100), { 1, 2, 3, 4, 5, 6, 48, 49, 50, 51, 52, 53, 95, 96, 97, 98, 99, 100 })
-expectList("101 pages, defaults", Sample.pages(101), { 1, 2, 3, 4, 5, 6, 48, 49, 50, 51, 52, 53, 96, 97, 98, 99, 100, 101 })
-expectList("18 pages, defaults: every page once", Sample.pages(18),
-    { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 })
-expectList("17 pages, defaults: 17 unique", Sample.pages(17),
-    { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 })
+expectList("100 pages, defaults: six from the middle", Sample.pages(100), { 48, 49, 50, 51, 52, 53 })
+expectList("101 pages, defaults", Sample.pages(101), { 48, 49, 50, 51, 52, 53 })
+expectList("18 pages, defaults: the six middle pages", Sample.pages(18), { 7, 8, 9, 10, 11, 12 })
+expectList("17 pages, defaults", Sample.pages(17), { 6, 7, 8, 9, 10, 11 })
 expectList("1 page", Sample.pages(1), { 1 })
 expectList("3 pages", Sample.pages(3), { 1, 2, 3 })
-expectList("9 pages: segments overlap", Sample.pages(9), { 1, 2, 3, 4, 5, 6, 7, 8, 9 })
+expectList("9 pages: the middle is clamped to the book", Sample.pages(9), { 2, 3, 4, 5, 6, 7 })
 expectList("0 pages", Sample.pages(0), {})
 expectList("negative pages", Sample.pages(-3), {})
 expectList("nil pages", Sample.pages(nil), {})
 expectList("text pages", Sample.pages("abc"), {})
-expectList("fractional pages", Sample.pages(10.7), { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 })
+expectList("fractional pages", Sample.pages(10.7), { 3, 4, 5, 6, 7, 8 })
 expectList("custom 2/2/2", Sample.pages(50, 2, 2, 2), { 1, 2, 25, 26, 49, 50 })
 expectList("middle off", Sample.pages(50, 6, 0, 6), { 1, 2, 3, 4, 5, 6, 45, 46, 47, 48, 49, 50 })
 expectList("start off", Sample.pages(50, 0, 4, 6), { 24, 25, 26, 27, 45, 46, 47, 48, 49, 50 })
 expectList("end off", Sample.pages(50, 6, 4, 0), { 1, 2, 3, 4, 5, 6, 24, 25, 26, 27 })
 expectList("all off", Sample.pages(50, 0, 0, 0), {})
 expectList("negative count = off", Sample.pages(50, -1, -1, -1), {})
-expectList("nil counts use defaults", Sample.pages(50, nil, nil, nil),
-    { 1, 2, 3, 4, 5, 6, 23, 24, 25, 26, 27, 28, 45, 46, 47, 48, 49, 50 })
-expectList("text counts use defaults", Sample.pages(50, "x", "y", "z"),
-    { 1, 2, 3, 4, 5, 6, 23, 24, 25, 26, 27, 28, 45, 46, 47, 48, 49, 50 })
+expectList("nil counts use defaults", Sample.pages(50, nil, nil, nil), { 23, 24, 25, 26, 27, 28 })
+expectList("text counts use defaults", Sample.pages(50, "x", "y", "z"), { 23, 24, 25, 26, 27, 28 })
 expectList("fractional counts floor", Sample.pages(50, 2.9, 2.9, 2.9), { 1, 2, 25, 26, 49, 50 })
 expectList("counts beyond the book clamp", Sample.pages(5, 100, 100, 100), { 1, 2, 3, 4, 5 })
 expectList("count of 1", Sample.pages(20, 1, 1, 1), { 1, 10, 20 })
@@ -67,10 +63,10 @@ for _i, page in ipairs(Sample.pages(1000)) do
     seen[page] = true
 end
 expect("1000 pages: no duplicates", repeated, false)
-expect("1000 pages: 18 in sample", #Sample.pages(1000), 18)
-expect("default first", Sample.DEFAULT_FIRST, 6)
+expect("1000 pages: 6 in sample", #Sample.pages(1000), 6)
+expect("default first", Sample.DEFAULT_FIRST, 0)
 expect("default middle", Sample.DEFAULT_MIDDLE, 6)
-expect("default last", Sample.DEFAULT_LAST, 6)
+expect("default last", Sample.DEFAULT_LAST, 0)
 
 expect("median odd", Sample.median({ 7, 1, 4 }), 4)
 expect("median even", Sample.median({ 8, 1, 4, 2 }), 3)

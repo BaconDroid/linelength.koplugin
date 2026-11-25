@@ -2,9 +2,11 @@
 -- requires, so it is tested on a desktop Lua.
 local Sample = {}
 
-Sample.DEFAULT_FIRST = 6
+-- Six pages from the middle: the middle is body text in any book, where the first and last pages can be
+-- a cover, a title page or a table of contents. The counts stay settable for a book that needs more.
+Sample.DEFAULT_FIRST = 0
 Sample.DEFAULT_MIDDLE = 6
-Sample.DEFAULT_LAST = 6
+Sample.DEFAULT_LAST = 0
 
 -- Unusable settings fall back to the default; a negative count switches its segment off.
 local function count(value, default)
