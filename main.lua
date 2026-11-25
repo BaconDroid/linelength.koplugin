@@ -284,10 +284,36 @@ function LineLength:measureSample(counts)
         ui:handleEvent(Event:new("GotoPage", page))
     end
     local measured, values = {}, {}
+    -- A page that could not be drawn off screen: the sample is then incomplete, and an incomplete
+    -- sample must not be handed to the caller as if it were a whole one.
+    local paint_failed = false
+    -- The measurement of a page that has been drawn: a page that is still being laid out would give
+    -- the numbers of the previous layout, so it is drawn and measured again until it holds still.
+    -- nil and "paint" when the page could not be drawn at all.
+    local function measureDrawn()
+        if draw() == false then
+            return nil, "paint"
+        end
+        local report = pageReport(ui)
+        for _try = 1, SETTLE_TRIES do
+            local ok_settled, delayed = pcall(function() return doc:isRerenderingDelayed() end)
+            if not (ok_settled and delayed) then
+                break
+            end
+            if draw() == false then
+                return nil, "paint"
+            end
+            local again = pageReport(ui)
+            if not sameReport(report, again) then
+                report = again
+            end
+        end
+        return report
+    end
     local ok_loop, err = pcall(function()
-        -- The page the reader is on is measured first, when it is one of the sampled pages: it is
-        -- already laid out, so it costs nothing, and it does not have to be visited again. A page
-        -- outside the sample is left out, or it would weigh on the median of the sample.
+        -- The page the reader is on is measured first, when it is one of the sampled pages: it does
+        -- not have to be visited again. A page outside the sample is left out, or it would weigh on
+        -- the median of the sample.
         local current_is_sampled = false
         for _i, page in ipairs(pages) do
             if page == current then
@@ -296,7 +322,14 @@ function LineLength:measureSample(counts)
             end
         end
         if current and current_is_sampled then
-            local report = pageReport(ui)
+            -- The page on screen is drawn and settled like every other one: a layout that was
+            -- changed a moment ago is still being laid out, and the numbers of the old layout would
+            -- go into the sample with the numbers of the new one.
+            local report, reason = measureDrawn()
+            if reason == "paint" then
+                paint_failed = true
+                return
+            end
             if report then
                 measured[#measured + 1] = { page = current, chars = report.chars }
                 values[#values + 1] = report.chars
@@ -305,24 +338,10 @@ function LineLength:measureSample(counts)
         for _i, page in ipairs(pages) do
             if page ~= current then
                 turnTo(page)
-                if draw() == false then
-                    return -- the page could not be drawn off screen: the sample stops here
-                end
-                -- A page that is still being laid out would give the numbers of the previous layout:
-                -- it is drawn and measured again until it holds still.
-                local report = pageReport(ui)
-                for _try = 1, SETTLE_TRIES do
-                    local ok, delayed = pcall(function() return doc:isRerenderingDelayed() end)
-                    if not (ok_delayed and delayed) then
-                        break
-                    end
-                    if draw() == false then
-                        return
-                    end
-                    local again = pageReport(ui)
-                    if not sameReport(report, again) then
-                        report = again
-                    end
+                local report, reason = measureDrawn()
+                if reason == "paint" then
+                    paint_failed = true
+                    return
                 end
                 if report then
                     measured[#measured + 1] = { page = page, chars = report.chars }
@@ -333,18 +352,24 @@ function LineLength:measureSample(counts)
     end)
     -- The way back is its own step: a page that could not be read still leaves the reader where it was.
     -- A failure to go back is a failure of the sample: the reader would be left on a sampled page.
-    local ok, back_err = pcall(turnTo, current)
-    local ok, release_err = pcall(release)
+    -- The two statuses are kept apart: the buffer is given back either way, but a reader left on a
+    -- sampled page is a failure of the sample, not a success with a warning.
+    local ok_back, back_err = pcall(turnTo, current)
+    local ok_release, release_err = pcall(release)
     if not ok_loop then
         logger.warn("linelength: could not walk the pages of the sample:", err)
         return nil, "error"
     end
-    if not ok then
+    if not ok_back then
         logger.warn("linelength: could not put the reader back on its page:", back_err)
         return nil, "error"
     end
-    if not ok then
+    if not ok_release then
         logger.warn("linelength: could not release the off-screen buffer:", release_err)
+    end
+    if paint_failed then
+        logger.warn("linelength: could not draw the pages of the sample off screen")
+        return nil, "error"
     end
     if #values == 0 then
         return nil, "empty"
@@ -504,12 +529,9 @@ end
 -- loop stops on what the book really holds and not on what the formula predicts.
 function LineLength:autoTune(settings)
     settings = settings or {}
-    local limits = {
-        margin_min = settings.margin_min,
-        margin_max = settings.margin_max,
-        max_chars_per_step = settings.max_chars_per_step,
-        target = settings.target,
-    }
+    -- The band, the target and the bounds of the margins, as the reader set them. The loop stops on
+    -- the band and the step aims at the target, so both helpers have to be given the same one.
+    local limits = AutoTune.limits(settings)
     local counts = {
         first = settings.sample_first,
         middle = settings.sample_middle,
@@ -524,29 +546,36 @@ function LineLength:autoTune(settings)
         return nil
     end
     local chars = sample.median
-    local steps, changed = 0, false
+    local steps, changed, verified = 0, false, true
     local layout = self:currentLayout()
     if not layout then
         return nil
     end
-    -- The calculation starts from the margin the book really has, even when it is outside the bounds:
-    -- the measurement was taken at that margin, and it is what the next step has to answer for.
-    local margin = tonumber(layout.margins[1]) or AutoTune.MARGIN_MIN
+    -- The two margins are the white space around the text, and the text block is what the lines are
+    -- laid out in: the step works on the average of the two, so that an uneven layout is measured
+    -- on the width it really has.
+    local left = tonumber(layout.margins[1]) or AutoTune.MARGIN_MIN
+    local right = tonumber(layout.margins[2]) or left
+    local margin = (left + right) / 2
     -- A margin outside the bounds comes back inside them, even when the lines are already in the band:
     -- the bounds are what the reader asked for, and a margin of zero or a huge one is not what they want.
-    if margin < limits.margin_min or margin > limits.margin_max then
+    -- Both margins are looked at: one of them out of the bounds is enough to pull the layout back in.
+    if left < limits.margin_min or left > limits.margin_max
+        or right < limits.margin_min or right > limits.margin_max then
         margin = math.max(limits.margin_min, math.min(limits.margin_max, margin))
         self:applyLayout({ margin, margin }, nil)
         changed = true
         steps = steps + 1
         local again = self:measureSample(counts)
         if not again then
-            return { steps = steps, chars = chars, changed = changed, margin = margin }
+            -- The new layout could not be measured: the count of the old one says nothing about the
+            -- book any more, so no count is reported.
+            return { steps = steps, chars = nil, changed = changed, margin = margin }
         end
         chars = again.median
     end
 
-    while not AutoTune.inBand(chars) and steps < max_steps do
+    while not AutoTune.inBand(chars, limits) and steps < max_steps do
         local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
         if not next_margin then
             break -- nothing more can be tried: the book is as good as it can get
@@ -557,9 +586,15 @@ function LineLength:autoTune(settings)
         steps = steps + 1
         local again = self:measureSample(counts)
         if not again then
+            verified = false -- the new layout could not be measured: the count is not the book's any more
             break
         end
         chars = again.median
+    end
+    if not verified then
+        -- The margins were moved but the book could not be measured again: the count of the old
+        -- layout would be reported for a layout that is not there any more, so no count is reported.
+        return { steps = steps, chars = nil, changed = changed, margin = margin }
     end
     return { steps = steps, chars = chars, changed = changed, margin = margin }
 end
@@ -581,8 +616,13 @@ function LineLength:onReaderReady()
         logger.warn("linelength: the auto-tune failed:", result)
         return
     end
+    -- Only a book that was really measured is remembered as tuned: a measurement that failed leaves
+    -- the book to be measured again the next time it is opened.
+    if not result or result.chars == nil then
+        return
+    end
     BookState.markTuned(self.ui)
-    if result and result.changed then
+    if result.changed then
         logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
     end
 end
@@ -646,6 +686,10 @@ function LineLength:showSampleResult(counts)
             text = _("This only works in books that reflow, like EPUB.")
         elseif reason == "no_buffer" then
             text = _("Not enough memory to measure a sample of pages.")
+        elseif reason == "error" then
+            -- The walk failed on the way: the reader could not be put back on its page, or the pages
+            -- could not be drawn. There is nothing to report about the book.
+            text = _("Could not measure the pages of this book.")
         else
             text = _("There is no text on these pages.")
         end
@@ -675,14 +719,21 @@ function LineLength:tuneNow()
             UIManager:show(InfoMessage:new{ text = _("Could not tune this book.") })
             return
         end
+        -- A book that could not be measured has no count to show, and is not remembered as tuned:
+        -- the message about nothing to change is for a book that was measured and is already there.
+        if not result or result.chars == nil then
+            logger.warn("linelength: the auto-tune could not measure the book")
+            UIManager:show(InfoMessage:new{ text = _("Could not tune this book.") })
+            return
+        end
         BookState.markTuned(self.ui)
-        if result and result.changed then
+        if result.changed then
             UIManager:show(InfoMessage:new{
                 text = T(_("Tuned to %1 characters."), n(result.chars)),
             })
         else
             UIManager:show(InfoMessage:new{
-                text = T(_("Already %1 characters, nothing to change."), n(result and result.chars or 0)),
+                text = T(_("Already %1 characters, nothing to change."), n(result.chars)),
             })
         end
     end)
@@ -724,7 +775,21 @@ function LineLength:settingsMenu()
     local function save()
         Settings:write(settings)
     end
-    local function number(label, key, step, min, max)
+    -- A number, with a step of one. The bounds a number is given here are its own. A number that is
+    -- one end of a pair also gets the other end of the pair as a bound, so that the two can never
+    -- cross: `other_above` says the other end of the pair is the upper one.
+    local function number(label, key, step, min, max, other_key, other_above)
+        local function limit(direction)
+            if not other_key then
+                return direction > 0 and max or min
+            end
+            local other = tonumber(settings[other_key]) or (direction > 0 and max or min)
+            -- The other end of the pair is above this one: it bounds the step up, and not down.
+            if other_above then
+                return direction > 0 and math.min(max, other) or min
+            end
+            return direction > 0 and max or math.max(min, other)
+        end
         return {
             text_func = function()
                 return T(_("%1: %2"), label, tostring(settings[key]))
@@ -733,17 +798,17 @@ function LineLength:settingsMenu()
             sub_item_table = {
                 {
                     text = T(_("Less %1"), label),
-                    enabled_func = function() return settings[key] > min end,
+                    enabled_func = function() return settings[key] > limit(-1) end,
                     callback = function()
-                        settings[key] = math.max(min, settings[key] - step)
+                        settings[key] = math.max(limit(-1), settings[key] - step)
                         save()
                     end,
                 },
                 {
                     text = T(_("More %1"), label),
-                    enabled_func = function() return settings[key] < max end,
+                    enabled_func = function() return settings[key] < limit(1) end,
                     callback = function()
-                        settings[key] = math.min(max, settings[key] + step)
+                        settings[key] = math.min(limit(1), settings[key] + step)
                         save()
                     end,
                 },
@@ -771,11 +836,11 @@ function LineLength:settingsMenu()
                 save()
             end,
         },
-        number(_("Shortest line"), "band_min", 1, 30, 80),
-        number(_("Longest line"), "band_max", 1, 30, 80),
+        number(_("Shortest line"), "band_min", 1, 30, 80, "band_max", true),
+        number(_("Longest line"), "band_max", 1, 30, 80, "band_min", false),
         number(_("Target line length"), "target", 1, 30, 100),
-        number(_("Smallest margin"), "margin_min", 1, 0, 140),
-        number(_("Biggest margin"), "margin_max", 1, 0, 140),
+        number(_("Smallest margin"), "margin_min", 1, 0, 140, "margin_max", true),
+        number(_("Biggest margin"), "margin_max", 1, 0, 140, "margin_min", false),
         number(_("Characters per step"), "max_chars_per_step", 1, 1, 30),
         number(_("Pages at the start"), "sample_first", 1, 0, 20),
         number(_("Pages in the middle"), "sample_middle", 1, 1, 20),
