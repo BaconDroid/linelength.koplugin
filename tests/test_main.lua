@@ -1,4 +1,3 @@
--- Wiring test for main.lua with KOReader stubbed out. It models source, not hardware.
 package.path = "./?.lua;" .. package.path
 
 -- ---- stubs --------------------------------------------------------------------------------

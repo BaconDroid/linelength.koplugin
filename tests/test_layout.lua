@@ -1,5 +1,3 @@
--- Unit tests for linelength/layout.lua. Run through tests/run.py (lupa), not on the device.
--- Every expected number was worked out by hand first (see the comments), not copied from the output.
 package.path = "./?.lua;" .. package.path
 local Layout = require("linelength/layout")
 

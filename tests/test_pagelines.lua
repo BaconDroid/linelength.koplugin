@@ -1,5 +1,3 @@
--- Unit tests for linelength/pagelines.lua, against a fake document engine that behaves the way the real one
--- was measured to (see the comment at the top of that file). Run through tests/run.py (lupa).
 package.path = "./?.lua;" .. package.path
 local PageLines = require("linelength/pagelines")
 

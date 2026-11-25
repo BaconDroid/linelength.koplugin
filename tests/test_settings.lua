@@ -1,6 +1,3 @@
--- Unit tests for linelength/settings.lua. Run through tests/run.py (lupa), not on the device.
--- The settings of the plugin live in a file of KOReader's, which is stubbed here: the point of the
--- tests is what the plugin does with what it reads.
 package.path = "./?.lua;" .. package.path
 
 local failures = 0

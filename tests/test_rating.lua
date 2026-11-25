@@ -1,4 +1,3 @@
--- Unit tests for linelength/rating.lua. Run through tests/run.py (lupa), not on the device.
 package.path = "./?.lua;" .. package.path
 local Rating = require("linelength/rating")
 
