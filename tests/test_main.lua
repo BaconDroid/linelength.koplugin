@@ -72,9 +72,9 @@ package.preload["device"] = function()
         end,
     } }
 end
--- KOReader's Event: a name and its arguments
+-- KOReader's Event: a name, the handler it dispatches to ("on" .. name) and the arguments
 package.preload["ui/event"] = function()
-    return { new = function(_self, name, ...) return { name = name, args = { ... } } end }
+    return { new = function(_self, name, ...) return { name = name, handler = "on" .. name, args = { ... } } end }
 end
 package.preload["dispatcher"] = function()
     return { registerAction = function(_self, name, def) actions[name] = def end }
