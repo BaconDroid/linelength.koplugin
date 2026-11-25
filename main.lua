@@ -236,12 +236,12 @@ local function sampleCounts(counts)
         counts.last or Sample.DEFAULT_LAST
 end
 
---- Measures the longest line of each page of a sample of the book, without showing those pages.
--- The page on screen is measured first, because it is already laid out and it is the page the reader is
--- looking at. The other pages are reached with a page turn and drawn into a buffer nobody sees (see
--- newDrawer), then the reader is put back where it was. Nothing is refreshed: KOReader marks the view as
--- not drawn when the page changes and leaves the e-ink panel alone until the next UIManager cycle, so a
--- whole sample is walked through without a single blink.
+-- The longest line of each page of a sample of the book, without showing those pages.
+-- The longest line of each page of a sample of the book, measured off screen.
+-- The pages are reached with a page turn and drawn into a buffer nobody sees (see newDrawer), then the
+-- reader is put back where it was. Nothing is refreshed: KOReader marks the view as not drawn when the
+-- page changes and leaves the e-ink panel alone until the next UIManager cycle, so a whole sample is
+-- walked through without a single blink.
 -- Returns nil and a reason when the book cannot be sampled; otherwise a table with `pages` (page number
 -- and characters of each page that could be read), `values` (those character counts), `median`, `min`,
 -- `max` and `total` (the number of pages in the book).
@@ -256,8 +256,8 @@ function LineLength:measureSample(counts)
     if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer) then
         return nil, "unsupported"
     end
-    local ok_count, total = pcall(doc.getPageCount, doc)
-    if not ok_count or type(total) ~= "number" or total < 1 then
+    local ok, total = pcall(doc.getPageCount, doc)
+    if not ok or type(total) ~= "number" or total < 1 then
         return nil, "empty"
     end
     local first, middle, last = sampleCounts(counts)
@@ -267,8 +267,8 @@ function LineLength:measureSample(counts)
     end
 
     -- Without a page to come back to, the walk would leave the reader on a sampled page.
-    local ok_start, current = pcall(doc.getCurrentPage, doc)
-    current = ok_start and tonumber(current) or nil
+    local ok, current = pcall(doc.getCurrentPage, doc)
+    current = ok and tonumber(current) or nil
     if not current or current < 1 then
         return nil, "no_position"
     end
@@ -283,7 +283,7 @@ function LineLength:measureSample(counts)
         ui:handleEvent(Event:new("GotoPage", page))
     end
     local measured, values = {}, {}
-    local ok_walk, err = pcall(function()
+    local ok_loop, err = pcall(function()
         -- The page the reader is on is measured first, when it is one of the sampled pages: it is
         -- already laid out, so it costs nothing, and it does not have to be visited again. A page
         -- outside the sample is left out, or it would weigh on the median of the sample.
@@ -311,7 +311,7 @@ function LineLength:measureSample(counts)
                 -- it is drawn and measured again until it holds still.
                 local report = pageReport(ui)
                 for _try = 1, SETTLE_TRIES do
-                    local ok_delayed, delayed = pcall(function() return doc:isRerenderingDelayed() end)
+                    local ok, delayed = pcall(function() return doc:isRerenderingDelayed() end)
                     if not (ok_delayed and delayed) then
                         break
                     end
@@ -332,17 +332,17 @@ function LineLength:measureSample(counts)
     end)
     -- The way back is its own step: a page that could not be read still leaves the reader where it was.
     -- A failure to go back is a failure of the sample: the reader would be left on a sampled page.
-    local ok_back, back_err = pcall(turnTo, current)
-    local ok_release, release_err = pcall(release)
-    if not ok_walk then
+    local ok, back_err = pcall(turnTo, current)
+    local ok, release_err = pcall(release)
+    if not ok_loop then
         logger.warn("linelength: could not walk the pages of the sample:", err)
         return nil, "error"
     end
-    if not ok_back then
+    if not ok then
         logger.warn("linelength: could not put the reader back on its page:", back_err)
         return nil, "error"
     end
-    if not ok_release then
+    if not ok then
         logger.warn("linelength: could not release the off-screen buffer:", release_err)
     end
     if #values == 0 then
@@ -498,8 +498,9 @@ end
 -- The auto-tune: measures the line length of a sample of the book and, when it is outside the band the
 -- reader asked for, moves the margins until it is inside. The size of the text is the reader's own and
 -- is never touched. Every step is measured again, so the loop stops on what the book really holds.
--- @param settings table the settings, as in linelength/settings.lua
--- @return table|nil what happened: { steps, chars, changed } ; nil when nothing was done
+-- The margins of the book, moved until the lines hold the number of characters the reader asked for.
+-- The size of the text is never touched: it is the reader's own. Every step is measured again, so the
+-- loop stops on what the book really holds and not on what the formula predicts.
 function LineLength:autoTune(settings)
     settings = settings or {}
     local limits = {
@@ -569,8 +570,8 @@ function LineLength:onReaderReady()
     if not ok or not settings.enabled then
         return
     end
-    local done_ok, result = pcall(function() return (self:autoTune(settings)) end)
-    if not done_ok then
+    local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
+    if not ok_tune then
         logger.warn("linelength: the auto-tune failed:", result)
         return
     end
