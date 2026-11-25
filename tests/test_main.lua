@@ -381,7 +381,10 @@ expect("sample menu item text", items.linelength_sample and items.linelength_sam
 expect("sample menu item goes in the Typeset menu", items.linelength_sample and items.linelength_sample.sorting_hint, "typeset")
 local item_count = 0
 for _k in pairs(items) do item_count = item_count + 1 end
-expect("three menu items", item_count, 3)
+expect("four menu items", item_count, 4)
+expect("the tune menu item", items.linelength_tune and items.linelength_tune.text, "Line length: tune this book")
+expect("the tune action is registered", type(actions["linelength_tune"]), "table")
+expect("the tune action event", actions["linelength_tune"] and actions["linelength_tune"].event, "LinelengthTune")
 expect("the settings menu item", items.linelength_settings and items.linelength_settings.text, "Line length: settings")
 expect("the settings menu item goes in the Typeset menu", items.linelength_settings and items.linelength_settings.sorting_hint, "typeset")
 expect("the settings menu has a sub menu", type(items.linelength_settings and items.linelength_settings.sub_item_table_func), "function")

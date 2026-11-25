@@ -24,6 +24,7 @@ local Report = require("linelength/report")
 local Sample = require("linelength/sample")
 local AutoTune = require("linelength/autotune")
 local Settings = require("linelength/settings")
+local BookState = require("linelength/bookstate")
 
 local LineLength = WidgetContainer:extend{
     name = "linelength",
@@ -570,11 +571,17 @@ function LineLength:onReaderReady()
     if not ok or not settings.enabled then
         return
     end
+    -- A book that was already tuned keeps its margins: it is not measured again every time it is
+    -- opened. The flag lives in the settings of the book, so it follows the book.
+    if settings.tune_once and BookState.wasTuned(self.ui) then
+        return
+    end
     local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
     if not ok_tune then
         logger.warn("linelength: the auto-tune failed:", result)
         return
     end
+    BookState.markTuned(self.ui)
     if result and result.changed then
         logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
     end
@@ -653,6 +660,39 @@ function LineLength:onLinelengthSample()
     return true
 end
 
+-- Tunes the book now, and says what came of it. The book is measured again even when it was already
+-- tuned: this is the action the reader reaches for when a book does not look right.
+function LineLength:tuneNow()
+    local ok, settings = pcall(function() return Settings:read() end)
+    if not ok then
+        return
+    end
+    UIManager:show(InfoMessage:new{ text = _("Tuning..."), timeout = 1 })
+    UIManager:tickAfterNext(function()
+        local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
+        if not ok_tune then
+            logger.warn("linelength: the auto-tune failed:", result)
+            UIManager:show(InfoMessage:new{ text = _("Could not tune this book.") })
+            return
+        end
+        BookState.markTuned(self.ui)
+        if result and result.changed then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Tuned to %1 characters."), n(result.chars)),
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("Already %1 characters, nothing to change."), n(result and result.chars or 0)),
+            })
+        end
+    end)
+end
+
+function LineLength:onLinelengthTune()
+    self:tuneNow()
+    return true
+end
+
 -- The page measurement as an action, so it can be put on a gesture, a quick action or a profile.
 function LineLength:onDispatcherRegisterActions()
     -- The id "wordcount_page" is the plugin's old name. KOReader stores it in gesture and profile settings, so it
@@ -664,6 +704,10 @@ function LineLength:onDispatcherRegisterActions()
     })
     Dispatcher:registerAction("linelength_sample", {
         category = "none", event = "LinelengthSample", title = _("Line length: this book (sample)"),
+        rolling = true,
+    })
+    Dispatcher:registerAction("linelength_tune", {
+        category = "none", event = "LinelengthTune", title = _("Line length: tune this book"),
         rolling = true,
     })
 end
@@ -717,6 +761,16 @@ function LineLength:settingsMenu()
                 save()
             end,
         },
+        {
+            text_func = function()
+                return settings.tune_once and _("Tune each book once: on") or _("Tune each book once: off")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                settings.tune_once = not settings.tune_once
+                save()
+            end,
+        },
         number(_("Shortest line"), "band_min", 1, 30, 80),
         number(_("Longest line"), "band_max", 1, 30, 80),
         number(_("Target line length"), "target", 1, 30, 100),
@@ -740,6 +794,11 @@ function LineLength:addToMainMenu(menu_items)
         text = _("Line length: this book (sample)"),
         sorting_hint = "typeset",
         callback = function() self:showSample() end,
+    }
+    menu_items.linelength_tune = {
+        text = _("Line length: tune this book"),
+        sorting_hint = "typeset",
+        callback = function() self:tuneNow() end,
     }
     menu_items.linelength_settings = {
         text = _("Line length: settings"),

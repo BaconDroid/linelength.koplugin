@@ -96,8 +96,28 @@ function ui:handleEvent(ev)
     end
 end
 
+-- The settings of the book: the harness has no KOReader sidecar, so a plain table stands in for it.
+local book_store = {}
+local book_store = {}
+ui.doc_settings = {
+    readSetting = function(_self, key) return book_store[key] end,
+    saveSetting = function(_self, key, value) book_store[key] = value end,
+    delSetting = function(_self, key) book_store[key] = nil end,
+    flush = function() end,
+}
+
 local plugin = LineLength:new{ document = doc, ui = ui }
 plugin:init()
+
+-- The settings the plugin reads: the harness has no KOReader settings file, so they are given here.
+local Settings = require("linelength/settings")
+local real_read = Settings.read
+Settings.read = function() return {
+    enabled = true, tune_once = true,
+    band_min = 56, band_max = 60, target = 58,
+    margin_min = 20, margin_max = 50, max_chars_per_step = 6,
+    sample_first = 0, sample_middle = 6, sample_last = 0, max_steps = 6,
+} end
 
 local settings = {
     enabled = true,
@@ -207,6 +227,21 @@ print(string.format("the book is now %d pages (it was %d), the reader is on page
 local again = plugin:autoTune(settings)
 check("a second run leaves the book alone", again and again.changed == false, tostring(again and again.changed))
 check("and it measures the same", again and again.chars == result.chars, tostring(again and again.chars))
+
+-- The flag: a book that was already tuned is not measured again when it is opened.
+local BookState = require("linelength/bookstate")
+BookState.markTuned(ui)
+check("the book is remembered as tuned", BookState.wasTuned(ui) == true, "the flag is in the settings of the book")
+local measured_again = false
+plugin.measureSample = function() measured_again = true; return nil, "unsupported" end
+plugin:onReaderReady()
+check("a tuned book is not measured again", measured_again == false, "measured_again=" .. tostring(measured_again))
+
+-- With the flag off, it is measured again.
+BookState.clearTuned(ui)
+measured_again = false
+plugin:onReaderReady()
+check("a book that was not tuned is measured again", measured_again == true, "measured_again=" .. tostring(measured_again))
 
 print("ALL LIVE CHECKS PASSED")
 os.exit(0)

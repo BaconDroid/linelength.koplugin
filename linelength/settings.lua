@@ -7,6 +7,7 @@ local Settings = {}
 -- of the text is never touched: it is the reader's own.
 Settings.DEFAULTS = {
     enabled = false,
+    tune_once = true,
     band_min = 56,
     band_max = 60,
     target = 58,
