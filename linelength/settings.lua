@@ -33,6 +33,11 @@ function Settings:read()
         settings[key] = stored[key]
         if settings[key] == nil then
             settings[key] = value
+        elseif type(value) == "number" then
+            -- The settings file is a plain Lua table, so a number written as a string stays a string, and
+            -- Lua refuses to compare a string with a number. The number is taken back here, once, for
+            -- everything that reads the settings.
+            settings[key] = tonumber(settings[key]) or value
         end
     end
     return settings

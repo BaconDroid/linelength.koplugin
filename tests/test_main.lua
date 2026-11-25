@@ -1162,6 +1162,7 @@ expect("cancel with a failing reader: no error escapes", cancel_ok, true)
 expect("cancel with a failing reader: it is logged", #warns, 1)
 
 local function tests_autotune()
+    local AutoTune = require("linelength/autotune")
     -- The auto-tune loop, run against a book that is simulated: the counts of the pages, the layout,
     -- and the number of times the layout was changed. What the loop does with them is the plugin's.
     local function tuneBook(opts)
@@ -1172,7 +1173,12 @@ local function tests_autotune()
         local measured = opts.measure
         local applied = {}
         tuned.currentLayout = function() return { margins = { margins[1], margins[2] }, size = 22 } end
-        tuned.applyLayout = function(_self, new_margins) applied[#applied + 1] = new_margins end
+        -- The layout the book really has follows what was applied to it, or the measurements would
+        -- always be the ones of the first layout.
+        tuned.applyLayout = function(_self, new_margins)
+            applied[#applied + 1] = new_margins
+            margins = { new_margins[1], new_margins[2] }
+        end
         tuned.measureSample = function()
             local value = measured(#applied, margins)
             if value == nil then return nil, "error" end
@@ -1209,13 +1215,20 @@ local function tests_autotune()
     expect("a book that cannot be measured again has no count", result and result.chars, nil)
     expect("but the change is still reported", result and result.changed, true)
 
-    -- The book can be measured but the band is out of reach: the margins stop at the bound and the
-    -- last measurement is reported.
-    result = tuneBook({
+    -- The book can be measured but the band is out of reach: the lines stay too long at every margin,
+    -- so the margins go as far as they can and stop at the bound, and the count that is left is the
+    -- one of that last layout, outside the band.
+    result, applied = tuneBook({
         margins = { 30, 30 },
-        measure = function(_calls, margins) return 90 - margins[1] end,
+        measure = function(_calls, current) return 120 - current[1] end,
     })
+    expect("a book whose band is out of reach moves the margins", #applied > 0, true)
+    expect("it stops at the bound", applied[#applied][1], 50)
     expect("a book whose band is out of reach still reports a count", type(result and result.chars), "number")
+    expect("and the count is outside the band", AutoTune.inBand(result.chars), false)
+    -- The count is the one of the last layout, not the one of the layout the book started with: the
+    -- two differ here, since the margins moved from 30 to 50.
+    expect("the count is the one of the last layout", result.chars, 120 - applied[#applied][1])
 
     -- The band the reader asked for is the one the loop stops on: with a band of 65 to 70 and a book
     -- that measures 58, the loop keeps going, although the default band of 56 to 60 would have called
