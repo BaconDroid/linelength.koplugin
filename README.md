@@ -56,6 +56,37 @@ good start, not a guarantee. It works in books that reflow (EPUB, FB2 and the li
 
 Thanks to the reddit user [Zanzel_Melancthones](https://www.reddit.com/user/Zanzel_Melancthones) for the suggestion to implement it this way.
 
+## Tuning a book by itself
+
+Two more entries in the Typeset menu:
+
+- **Line length: this book (sample)** measures the longest line of a few pages of the book and
+  reports the median, the shortest and the longest. The pages are read off screen, so the e-ink
+  panel does not move and the reader keeps its place.
+- **Line length: tune this book** moves the margins of the book until the lines hold the length
+  asked for, and says what came of it.
+
+Both are also actions, so they can be put on a gesture.
+
+**Line length: settings** holds the numbers the tuning works with:
+
+| Setting | What it means | Default |
+|:--------|:--------------|--------:|
+| Auto-tune when a book opens | tune the book when it is opened | off |
+| Tune each book once | do not tune a book that was already tuned | on |
+| Shortest and longest line | the band the line length has to land in | 56 to 60 characters |
+| Target line length | the length the margins aim for | 58 characters |
+| Smallest and biggest margin | how far the margins may go | 20 to 50 |
+| Characters per step | how much the line length may change at one step | 6 |
+| Pages at the start, in the middle, at the end | the pages that are measured | 0, 6, 0 |
+| Steps at most | how many times the margins are changed | 6 |
+
+The size of the text is never touched: it is the reader's own, and the margins are what the length
+of a line is made of. The top and bottom margins are left alone too: they change how many lines fit
+on a page, not how many characters a line holds.
+
+The margins are saved with the book, the way KOReader saves the margins a reader sets by hand.
+
 ## What the ranges are
 
 A character is a Unicode character of the line, including spaces and punctuation (`é` is one; invisible characters
