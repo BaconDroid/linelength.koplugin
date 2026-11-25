@@ -167,6 +167,13 @@ else
         before.median))
 end
 
+-- The place the reader is at in the text, before the tune: the layout changes and the book is laid
+-- out again, so the page numbers move, and the reader has to stay on the same place in the text.
+-- The place in the text is the xpointer: it points at a spot in the text itself, and the text it
+-- points at is still there after the change of the layout.
+local anchor = doc:getXPointer()
+check("the reader has an anchor in the text", anchor ~= nil, tostring(anchor))
+
 refreshes, paints = 0, 0
 local clock = os.clock()
 local result = plugin:autoTune(settings)
@@ -221,6 +228,13 @@ check("the text size is still the one the reader chose", layout.font_size == sta
 -- the same place in the text, not on the same page number.
 check("the reader is still in the book", doc:getCurrentPage() >= 1 and doc:getCurrentPage() <= doc:getPageCount(),
     "page " .. doc:getCurrentPage() .. " of " .. doc:getPageCount())
+-- The anchor is the place in the text the reader was at: after the change of the layout it can be on
+-- another page, but it is the same text, and the reader is still on it.
+local anchor_page = doc:getPageFromXPointer(anchor)
+check("the anchor is still in the book", anchor_page ~= nil and anchor_page >= 1
+    and anchor_page <= doc:getPageCount(), "page " .. tostring(anchor_page))
+check("the reader is still on the same place in the text", doc:isXPointerInCurrentPage(anchor),
+    "the anchor is on page " .. tostring(anchor_page) .. ", the reader is on page " .. doc:getCurrentPage())
 print(string.format("the book is now %d pages (it was %d), the reader is on page %d",
     doc:getPageCount(), pages, doc:getCurrentPage()))
 
