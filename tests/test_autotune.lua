@@ -65,6 +65,33 @@ expect("the margins are put the right way round", swapped.margin_min, 0)
 expect("the margins are put the right way round", swapped.margin_max, 140)
 expect("equal ends are left alone", AutoTune.limits({ band_min = 60, band_max = 60 }).band_min, 60)
 
+-- The settings file is a plain table, so a reader can leave anything in it: a value out of range is
+-- brought back to the edge of its range, and a value that is not a number falls back to the default.
+-- A margin below nothing and a step of nothing or less are the two that would break the loop.
+local wild = AutoTune.limits({
+    band_min = -10, band_max = -5, margin_min = -3, margin_max = -1, target = 999, max_chars_per_step = -2,
+})
+expect("a negative band comes back into range", wild.band_min, AutoTune.BAND_FLOOR)
+expect("a negative band comes back into range", wild.band_max, AutoTune.BAND_FLOOR)
+expect("a negative margin comes back to nothing", wild.margin_min, AutoTune.MARGIN_FLOOR)
+expect("a negative margin comes back to nothing", wild.margin_max, AutoTune.MARGIN_FLOOR)
+expect("a huge target comes back into the band", wild.target, AutoTune.BAND_FLOOR)
+expect("a step of less than one becomes one", wild.max_chars_per_step, AutoTune.STEP_FLOOR)
+expect("a wild setting still gives a margin inside the bounds",
+    AutoTune.nextMargin(30, 70, WIDTH, wild) >= AutoTune.MARGIN_FLOOR, true)
+
+local text = AutoTune.limits({ band_min = "x", margin_max = "y", max_chars_per_step = "z" })
+expect("a setting that is not a number falls back", text.band_min, AutoTune.BAND_MIN)
+expect("a setting that is not a number falls back", text.margin_max, AutoTune.MARGIN_MAX)
+expect("a setting that is not a number falls back", text.max_chars_per_step, AutoTune.MAX_CHARS_PER_STEP)
+
+-- The target is the length the loop aims at, and the band is what it stops on: a target outside the
+-- band is brought to the edge, so it cannot pull the loop past the band.
+local off_target = AutoTune.limits({ band_min = 56, band_max = 60, target = 90 })
+expect("a target above the band comes to its edge", off_target.target, 60)
+local under_target = AutoTune.limits({ band_min = 56, band_max = 60, target = 20 })
+expect("a target below the band comes to its edge", under_target.target, 56)
+
 -- The step aims at the band the reader asked for, not at the default one: with a band of 65 to 70
 -- and a target of 68, the lines are made longer towards 68, and the margins come in. With the
 -- default band of 56 to 60 the same lines would go the other way, towards 58.
@@ -189,10 +216,11 @@ local function long_chars_in(block)
     return math.floor(block * 70 / 612 + 0.5)
 end
 local start = 35
-local margin3, chars3, steps3 = simulate(start, long_chars_in(WIDTH - 2 * start), long_chars_in)
+local margin3, chars3, steps3, inside3 = simulate(start, long_chars_in(WIDTH - 2 * start), long_chars_in)
 expect("an unreachable band still moves the margins", steps3 > 0, true)
 expect("an unreachable band stops at the bound", margin3, AutoTune.MARGIN_MAX)
 expect("an unreachable band leaves the lines outside it", AutoTune.inBand(chars3), false)
+expect("an unreachable band keeps every move inside the bounds", inside3, true)
 
 if failures > 0 then
     error(failures .. " autotune test(s) failed")

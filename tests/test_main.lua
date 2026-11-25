@@ -1416,10 +1416,13 @@ local function tests_sample()
     local sample11 = sp11:measureSample()
     expect("per page: measured", type(sample11), "table")
     expect("per page: the six pages of the middle", #sample11.values, 6)
-    -- Every page of the sample has lines of its own length, so the counts are the lengths of the
-    -- pages that were read and not the lengths of one page read six times.
+    -- Every page of the sample has lines of its own length, and the fixture makes that length the page
+    -- number itself: each count is the page it came from, not the page the walk started on.
     local counts = {}
-    for _i, page in ipairs(sample11.pages) do counts[#counts + 1] = page.chars end
+    for _i, page in ipairs(sample11.pages) do
+        counts[#counts + 1] = page.chars
+        expect("per page: the page is measured on its own lines", page.chars, page.page)
+    end
     table.sort(counts)
     local all_different = true
     for i = 2, #counts do

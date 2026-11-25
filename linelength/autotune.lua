@@ -23,6 +23,28 @@ AutoTune.MARGIN_MAX = 50
 -- How many characters the line length may change in one step.
 AutoTune.MAX_CHARS_PER_STEP = 6
 
+-- The range the settings are held to, as the menu offers them: a value outside is brought back to the
+-- edge of its range rather than obeyed. A band of nothing and a margin of nothing are not a line and
+-- not a margin, so the band has a floor of its own and the margins have theirs.
+AutoTune.BAND_FLOOR = 10
+AutoTune.BAND_CEILING = 200
+AutoTune.MARGIN_FLOOR = 0
+AutoTune.MARGIN_CEILING = 200
+AutoTune.STEP_FLOOR = 1
+AutoTune.STEP_CEILING = 30
+
+-- A number from the settings, kept inside the range the menu offers. The settings file is a plain
+-- Lua table a reader can edit, so a value outside the range is not a reason to stop: it is brought
+-- back to the end of the range it belongs to, and a value that is not a number falls back to the
+-- default.
+local function within(value, default, min, max)
+    local n = tonumber(value)
+    if not n then
+        return default
+    end
+    return math.max(min, math.min(max, n))
+end
+
 --- The limits of the tune, from the settings the reader chose: the band of line lengths, the target
 --- inside it, the bounds of the margins and the size of a step, checked against each other so that
 --- the loop always has something to aim for.
@@ -30,10 +52,12 @@ AutoTune.MAX_CHARS_PER_STEP = 6
 --- @return table { band_min, band_max, target, margin_min, margin_max, max_chars_per_step }
 function AutoTune.limits(settings)
     settings = settings or {}
-    local band_min = tonumber(settings.band_min) or AutoTune.BAND_MIN
-    local band_max = tonumber(settings.band_max) or AutoTune.BAND_MAX
-    local margin_min = tonumber(settings.margin_min) or AutoTune.MARGIN_MIN
-    local margin_max = tonumber(settings.margin_max) or AutoTune.MARGIN_MAX
+    local band_min = within(settings.band_min, AutoTune.BAND_MIN, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING)
+    local band_max = within(settings.band_max, AutoTune.BAND_MAX, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING)
+    -- A margin is the white space around the text, so it has a floor of its own: a negative one is not
+    -- a margin at all, and KOReader would put a meaningless width on the page.
+    local margin_min = within(settings.margin_min, AutoTune.MARGIN_MIN, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING)
+    local margin_max = within(settings.margin_max, AutoTune.MARGIN_MAX, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING)
     -- The reader can leave a pair the wrong way round in the settings file: the shortest line cannot
     -- be longer than the longest one, so the pair is put the right way round here.
     if band_min > band_max then
@@ -42,13 +66,19 @@ function AutoTune.limits(settings)
     if margin_min > margin_max then
         margin_min, margin_max = margin_max, margin_min
     end
+    -- A step of nothing would leave the loop turning the same margin over and over, so the smallest
+    -- step is one character.
+    local target = within(settings.target, AutoTune.TARGET, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING)
     return {
         band_min = band_min,
         band_max = band_max,
-        target = tonumber(settings.target) or AutoTune.TARGET,
+        -- The target is the length the loop aims at, and the band is what it stops on: a target
+        -- outside the band is brought to the edge rather than left to pull the loop past it.
+        target = math.max(band_min, math.min(band_max, target)),
         margin_min = margin_min,
         margin_max = margin_max,
-        max_chars_per_step = tonumber(settings.max_chars_per_step) or AutoTune.MAX_CHARS_PER_STEP,
+        max_chars_per_step = within(settings.max_chars_per_step, AutoTune.MAX_CHARS_PER_STEP,
+            AutoTune.STEP_FLOOR, AutoTune.STEP_CEILING),
     }
 end
 

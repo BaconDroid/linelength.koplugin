@@ -280,6 +280,8 @@ function LineLength:measureSample(counts)
     end
     -- A page turn through the reader, not straight on the document: the reader keeps the page it is on
     -- and the view its state in step, so the page can be drawn and the reader put back afterwards.
+    -- Coming back to the page number is enough: crengine keeps the spot on the page, so a reader
+    -- partway through a page is put back on that spot and not at the top of the page.
     local function turnTo(page)
         ui:handleEvent(Event:new("GotoPage", page))
     end

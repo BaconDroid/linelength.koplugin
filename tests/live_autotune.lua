@@ -66,10 +66,9 @@ local function keepPlace()
     if not rolling.xpointer then
         return
     end
-    local page = doc:getPageFromXPointer(rolling.xpointer)
-    if page and page ~= doc:getCurrentPage() then
-        doc:gotoPage(page)
-    end
+    -- As ReaderRolling does after a re-render: the reader goes back to the text it was at, not to the
+    -- page number, because the page numbers are what the re-render has just changed.
+    doc:gotoXPointer(rolling.xpointer)
 end
 local ui = {
     document = doc,
@@ -85,6 +84,12 @@ function ui:handleEvent(ev)
     if ev.handler == "onGotoPage" then
         doc:gotoPage(ev.args[1])
         rolling.xpointer = doc:getXPointer()
+        return true
+    end
+    if ev.handler == "onGotoXPointer" then
+        -- As ReaderRolling does: the reader goes to the text the xpointer points at.
+        doc:gotoXPointer(ev.args[1])
+        rolling.xpointer = ev.args[1]
         return true
     end
     if ev.handler == "onConfigChange" then
