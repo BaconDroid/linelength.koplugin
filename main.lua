@@ -170,12 +170,19 @@ local function newDrawer(ui, off_screen_only)
                 if off_screen then
                     local painted, err = pcall(view.paintTo, view, buffer, 0, 0)
                     if painted then
-                        return
+                        return true
                     end
-                    logger.warn("linelength: could not draw the page off screen, drawing it on the screen:", err)
+                    logger.warn("linelength: could not draw the page off screen:", err)
+                    if off_screen_only then
+                        -- Drawing off screen failed: the sample stops there rather than painting every
+                        -- page on the e-ink panel, which is what the reader would see.
+                        off_screen = false
+                        return false
+                    end
                     off_screen = false
                 end
                 UIManager:forceRePaint()
+                return true
             end
             local function release() buffer:free() end
             return draw, release
@@ -244,6 +251,11 @@ function LineLength:measureSample(counts)
     if not (doc and doc.getPageCount and ui.handleEvent) then
         return nil, "unsupported"
     end
+    -- Only a book that reflows has lines of text to measure; a PDF or a comic has pages, not lines,
+    -- and walking them would be a scan of nothing.
+    if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer) then
+        return nil, "unsupported"
+    end
     local ok_count, total = pcall(doc.getPageCount, doc)
     if not ok_count or type(total) ~= "number" or total < 1 then
         return nil, "empty"
@@ -254,8 +266,12 @@ function LineLength:measureSample(counts)
         return nil, "empty"
     end
 
+    -- Without a page to come back to, the walk would leave the reader on a sampled page.
     local ok_start, current = pcall(doc.getCurrentPage, doc)
     current = ok_start and tonumber(current) or nil
+    if not current or current < 1 then
+        return nil, "no_position"
+    end
     -- Without an off-screen buffer the walk would paint every page on the e-ink panel: do nothing instead.
     local draw, release = newDrawer(self.ui, true)
     if not draw then
@@ -268,7 +284,17 @@ function LineLength:measureSample(counts)
     end
     local measured, values = {}, {}
     local ok_walk, err = pcall(function()
-        if current then
+        -- The page the reader is on is measured first, when it is one of the sampled pages: it is
+        -- already laid out, so it costs nothing, and it does not have to be visited again. A page
+        -- outside the sample is left out, or it would weigh on the median of the sample.
+        local current_is_sampled = false
+        for _i, page in ipairs(pages) do
+            if page == current then
+                current_is_sampled = true
+                break
+            end
+        end
+        if current and current_is_sampled then
             local report = pageReport(ui)
             if report then
                 measured[#measured + 1] = { page = current, chars = report.chars }
@@ -278,8 +304,25 @@ function LineLength:measureSample(counts)
         for _i, page in ipairs(pages) do
             if page ~= current then
                 turnTo(page)
-                draw()
+                if draw() == false then
+                    return -- the page could not be drawn off screen: the sample stops here
+                end
+                -- A page that is still being laid out would give the numbers of the previous layout:
+                -- it is drawn and measured again until it holds still.
                 local report = pageReport(ui)
+                for _try = 1, SETTLE_TRIES do
+                    local ok_delayed, delayed = pcall(function() return doc:isRerenderingDelayed() end)
+                    if not (ok_delayed and delayed) then
+                        break
+                    end
+                    if draw() == false then
+                        return
+                    end
+                    local again = pageReport(ui)
+                    if not sameReport(report, again) then
+                        report = again
+                    end
+                end
                 if report then
                     measured[#measured + 1] = { page = page, chars = report.chars }
                     values[#values + 1] = report.chars
@@ -288,12 +331,15 @@ function LineLength:measureSample(counts)
         end
     end)
     -- The way back is its own step: a page that could not be read still leaves the reader where it was.
-    if current then
-        pcall(turnTo, current)
-    end
+    -- A failure to go back is a failure of the sample: the reader would be left on a sampled page.
+    local ok_back, back_err = pcall(turnTo, current)
     local ok_release, release_err = pcall(release)
     if not ok_walk then
         logger.warn("linelength: could not walk the pages of the sample:", err)
+        return nil, "error"
+    end
+    if not ok_back then
+        logger.warn("linelength: could not put the reader back on its page:", back_err)
         return nil, "error"
     end
     if not ok_release then
@@ -570,9 +616,17 @@ end
 
 -- Measures a sample of the book's pages and shows the result. The book is laid out again on every page
 -- that is measured, so this takes a few seconds on a device and the reader sees a "measuring" message.
+-- The measurement waits for the next UI tick, so that message is on the screen before the walk starts
+-- and is not replaced by the result without ever having been seen.
 function LineLength:showSample(counts)
     UIManager:show(InfoMessage:new{ text = _("Measuring pages..."), timeout = 1 })
-    local ok, sample, reason = pcall(function() return (self:measureSample(counts)) end)
+    UIManager:tickAfterNext(function()
+        self:showSampleResult(counts)
+    end)
+end
+
+function LineLength:showSampleResult(counts)
+    local ok, sample, reason = pcall(function() return self:measureSample(counts) end)
     if not ok then
         logger.warn("linelength: could not measure a sample of pages:", sample)
         UIManager:show(InfoMessage:new{ text = _("Could not measure the pages of this book.") })

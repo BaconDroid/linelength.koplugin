@@ -302,12 +302,23 @@ expect("Search stays where it was", rows[5][2], "12_search")
 local function fakeDoc(line_texts, opts)
     opts = opts or {}
     local NODE = "/b/p[1]/text()[1]"
+    -- The lines of a page depend on the page: a test that measures the wrong page is caught.
+    local page = 1
     local lines, offset = {}, 0
-    for i, s in ipairs(line_texts) do
-        lines[i] = { s = s, from = offset, to = offset + #s, y = 71 + (i - 1) * 64 }
-        offset = offset + #s + 1
+    local function layout()
+        lines, offset = {}, 0
+        for i, text in ipairs(line_texts) do
+            local shown = text
+            if opts.per_page then
+                shown = string.rep(text:sub(1, 1), opts.per_page(page) or #text)
+            end
+            lines[i] = { s = shown, from = offset, to = offset + #shown, y = 71 + (i - 1) * 64 }
+            offset = offset + #shown + 1
+        end
     end
+    layout()
     local d = {}
+    function d:setPage(p) page = p; layout() end
     function d:getTextFromPositions(p0, _p1)
         if opts.raises then error("engine boom") end
         if p0.y == 0 then
@@ -1148,8 +1159,10 @@ local function tests_sample()
     -- 12. a sample of pages: the page on screen first, the other pages drawn off screen, the reader put back.
     local function sampleBook(opts)
         opts = opts or {}
+        -- A different length per line, and the lines of the page come from the document, so a
+        -- measurement of the wrong page is caught instead of passing on the same numbers.
         local lines = opts.lines or { ("w"):rep(60), ("x"):rep(55), ("y"):rep(50) }
-        local doc = fakeDoc(lines, { raises = opts.raises })
+        local doc = fakeDoc(lines, { raises = opts.raises, per_page = opts.per_page })
         doc.pages = opts.pages or 100
         doc.current = opts.current or 1
         doc.gotos = {}
@@ -1192,8 +1205,11 @@ local function tests_sample()
     local sample = sp:measureSample()
     expect("sample: measured", type(sample), "table")
     expect("sample: total pages", sample and sample.total, 100)
-    expect("sample: the page on screen is measured first", sample and sample.pages[1].page, 3)
-    expect("sample: 7 pages read (the page on screen, then six from the middle)", sample and #sample.values, 7)
+    -- The reader is on page 3, which is not one of the six sampled pages of the middle: it is left
+    -- out, so that the median is the median of the sample and not of the sample and one more.
+    expect("sample: the first sampled page is in the middle of the book", sample and sample.pages[1].page, 48)
+    expect("sample: the sample is the six pages of the middle", #sample.values, 6)
+    expect("sample: 6 pages read", sample and #sample.values, 6)
     expect("sample: only the six other pages are drawn", sdoc.drawn, 6)
     expect("sample: one buffer", #buffers.created, 1)
     expect("sample: the buffer is given back", buffers.created[1] and buffers.created[1].freed, 1)
@@ -1212,8 +1228,8 @@ local function tests_sample()
     buffers.created, draws.n, repaints.n = {}, 0, 0
     local sp2, _ui2, sdoc2 = sampleBook({ pages = 100, current = 20 })
     local sample2 = sp2:measureSample()
-    expect("sample: 7 pages read when the current page is outside the sample", sample2 and #sample2.values, 7)
-    expect("sample: the current page comes first", sample2 and sample2.pages[1].page, 20)
+    expect("sample: the current page outside the sample is left out", sample2 and #sample2.values, 6)
+    expect("sample: the first sampled page is in the middle of the book", sample2 and sample2.pages[1].page, 48)
     expect("sample: back where it started", sdoc2.current, 20)
     expect("sample: one page turn per sampled page, and the way back", #sdoc2.gotos, 7)
 
@@ -1289,6 +1305,11 @@ local function tests_sample()
     local sp10 = sampleBook({ pages = 100, current = 1 })
     expect("sample action event", actions["linelength_sample"] and actions["linelength_sample"].event, "LinelengthSample")
     expect("sample event handler exists", type(sp10.onLinelengthSample), "function")
+    -- The handler has to do the work: a handler that does nothing would pass a type check.
+    local shown_count = 0
+    sp10.showSample = function() shown_count = shown_count + 1 end
+    sp10:onLinelengthSample()
+    expect("the sample handler measures the book", shown_count, 1)
 
     -- 13. the auto-tune: the settings, the switch, and the numbers in the menu.
     local Settings = require("linelength/settings")
