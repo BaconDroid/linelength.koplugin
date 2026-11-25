@@ -59,9 +59,21 @@ print(string.format("book: %s / %d pages / %dx%d px", book, pages, W, H))
 
 local rect = require("ui/geometry"):new{ x = 0, y = 0, w = W, h = H }
 local paints = 0
+-- The reader keeps the place the reader is at in the text, as ReaderRolling does: it is the xpointer,
+-- and it is what the reader is put back on when the layout changes and the pages move.
+local rolling = { xpointer = nil }
+local function keepPlace()
+    if not rolling.xpointer then
+        return
+    end
+    local page = doc:getPageFromXPointer(rolling.xpointer)
+    if page and page ~= doc:getCurrentPage() then
+        doc:gotoPage(page)
+    end
+end
 local ui = {
     document = doc,
-    rolling = {},
+    rolling = rolling,
     configurable = layout,
     view = { paintTo = function(_self, bb, x, y)
         paints = paints + 1
@@ -72,6 +84,7 @@ local ui = {
 function ui:handleEvent(ev)
     if ev.handler == "onGotoPage" then
         doc:gotoPage(ev.args[1])
+        rolling.xpointer = doc:getXPointer()
         return true
     end
     if ev.handler == "onConfigChange" then
@@ -86,12 +99,14 @@ function ui:handleEvent(ev)
         doc:setPageMargins(Screen:scaleBySize(ev.args[1][1]), Screen:scaleBySize(10),
             Screen:scaleBySize(ev.args[1][2]), Screen:scaleBySize(10))
         doc:render()
+        keepPlace()
         return true
     end
     if ev.handler == "onSetFontSize" then
         layout.font_size = ev.args[1]
         doc:setFontSize(Screen:scaleBySize(ev.args[1]))
         doc:render()
+        keepPlace()
         return true
     end
 end
@@ -148,9 +163,22 @@ doc:render()
 local start_page = math.floor(pages / 2)
 doc:gotoPage(start_page)
 doc:render()
+rolling.xpointer = doc:getXPointer()
+
+-- The place the reader is at in the text, before anything is measured or tuned: the layout changes
+-- and the book is laid out again, so the page numbers move, and the reader has to stay on the same
+-- place in the text. The place in the text is the xpointer: it points at a spot in the text itself,
+-- and the text it points at is still there after the change of the layout.
+-- It is taken here, before the first sample walk, so that a walk that does not put the reader back
+-- where it found it is caught too.
+local anchor = doc:getXPointer()
+check("the reader has an anchor in the text", anchor ~= nil, tostring(anchor))
 
 local before = plugin:measureSample()
 check("the book is measured before the tune", before ~= nil)
+check("the first sample left the reader where it found it", doc:isXPointerInCurrentPage(anchor),
+    "the reader is on page " .. doc:getCurrentPage() .. ", the anchor is on page "
+        .. tostring(doc:getPageFromXPointer(anchor)))
 print(string.format("before: median %s (min %s, max %s)", tostring(before.median), tostring(before.min), tostring(before.max)))
 -- The book has to start outside the band for the tune to have anything to do. The margins are set
 -- wide or narrow to get there; at some text sizes the band is reached either way, and then the tune
@@ -166,13 +194,6 @@ else
     print(string.format("the book starts in the band already (%d characters): the tune has nothing to do",
         before.median))
 end
-
--- The place the reader is at in the text, before the tune: the layout changes and the book is laid
--- out again, so the page numbers move, and the reader has to stay on the same place in the text.
--- The place in the text is the xpointer: it points at a spot in the text itself, and the text it
--- points at is still there after the change of the layout.
-local anchor = doc:getXPointer()
-check("the reader has an anchor in the text", anchor ~= nil, tostring(anchor))
 
 refreshes, paints = 0, 0
 local clock = os.clock()
