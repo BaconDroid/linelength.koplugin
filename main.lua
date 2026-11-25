@@ -237,7 +237,6 @@ local function sampleCounts(counts)
         counts.last or Sample.DEFAULT_LAST
 end
 
--- The longest line of each page of a sample of the book, without showing those pages.
 -- The longest line of each page of a sample of the book, measured off screen.
 -- The pages are reached with a page turn and drawn into a buffer nobody sees (see newDrawer), then the
 -- reader is put back where it was. Nothing is refreshed: KOReader marks the view as not drawn when the
@@ -525,10 +524,8 @@ end
 
 -- The auto-tune: measures the line length of a sample of the book and, when it is outside the band the
 -- reader asked for, moves the margins until it is inside. The size of the text is the reader's own and
--- is never touched. Every step is measured again, so the loop stops on what the book really holds.
--- The margins of the book, moved until the lines hold the number of characters the reader asked for.
--- The size of the text is never touched: it is the reader's own. Every step is measured again, so the
--- loop stops on what the book really holds and not on what the formula predicts.
+-- is never touched. Every step is measured again, so the loop stops on what the book really holds and
+-- not on what the formula predicts.
 function LineLength:autoTune(settings)
     settings = settings or {}
     -- The band, the target and the bounds of the margins, as the reader set them. The loop stops on

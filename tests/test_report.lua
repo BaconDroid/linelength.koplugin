@@ -1,3 +1,4 @@
+-- Unit tests for linelength/report.lua. Run through tests/run.py (lupa), not on the device.
 package.path = "./?.lua;" .. package.path
 local Report = require("linelength/report")
 

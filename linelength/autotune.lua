@@ -43,8 +43,7 @@ local function within(value, default, min, max)
     return math.max(min, math.min(max, n))
 end
 
--- The limits with the defaults filled in for whatever was left out, so that the functions below read
--- one shape and a caller can pass the whole table or nothing at all.
+-- The limits with the defaults filled in for whatever was left out.
 local function resolved(limits)
     limits = limits or {}
     return {
@@ -67,13 +66,9 @@ function AutoTune.limits(settings)
     local limits = resolved({
         band_min = within(settings.band_min, nil, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING),
         band_max = within(settings.band_max, nil, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING),
-        -- A margin is the white space around the text, so it has a floor of its own: a negative one is
-        -- not a margin at all, and KOReader would put a meaningless width on the page.
         margin_min = within(settings.margin_min, nil, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING),
         margin_max = within(settings.margin_max, nil, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING),
         target = within(settings.target, nil, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING),
-        -- A step of nothing would leave the loop turning the same margin over and over, so the smallest
-        -- step is one character.
         max_chars_per_step = within(settings.max_chars_per_step, nil, AutoTune.STEP_FLOOR, AutoTune.STEP_CEILING),
     })
     -- The reader can leave a pair the wrong way round in the settings file: the shortest line cannot be
@@ -131,17 +126,15 @@ function AutoTune.nextMargin(margin, chars, screen_width, limits)
     -- The aim: the target the reader asked for, inside the band the reader asked for.
     local aim = math.min(math.max(limits.target, limits.band_min), limits.band_max)
 
-    -- The step, in characters: the distance to the aim, capped at the step size the reader set. A step
-    -- that stayed outside the bounds would measure the same thing again, so the bounds are applied to
-    -- the margin it lands on, not to the one it starts from.
+    -- The step, in characters: the distance to the aim, capped at the step size the reader set.
     local step = math.max(-max_chars, math.min(max_chars, aim - chars))
 
     -- The margin that gives the text block the wanted number of characters.
     local next_margin = (width - text_width * (chars + step) / chars) / 2
     local new_margin = math.floor(next_margin + 0.5)
 
-    -- A margin outside the bounds comes back inside them first: the bounds are what the reader asked
-    -- for, and a step that stayed outside would measure the same thing again.
+    -- A margin outside the bounds comes back inside them first: a step that stayed outside would
+    -- measure the same thing again.
     if margin < limits.margin_min then
         new_margin = limits.margin_min
     elseif margin > limits.margin_max then
