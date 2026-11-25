@@ -14,7 +14,7 @@ local AutoTune = {}
 -- Where the line length should land: a band of good lengths, and the one to aim at inside it.
 AutoTune.BAND_MIN = 50
 AutoTune.BAND_MAX = 60
-AutoTune.TARGET = 60
+AutoTune.TARGET = 55
 
 -- The margins the tune may use.
 AutoTune.MARGIN_MIN = 10
@@ -51,13 +51,13 @@ function AutoTune.distance(chars)
 end
 
 --- The margins to try next.
---- The step aims at the band, not at the target: the band is what the loop stops on, so a step that
---- lands inside it ends the loop. Aiming at the target inside the band could jump over it and land on
---- the far side, still outside, and cost another step.
+--- The step aims at the target the reader asked for, the length of line they want to read at. It is
+--- kept inside the band: a step that would land outside it aims at the edge of the band instead, so
+--- the loop cannot step over it and land outside again.
 --- @param margin number the margin now, on both sides
 --- @param chars number the length of the longest line measured now
 --- @param screen_width number the width of the screen in KOReader's units
---- @param limits table|nil margin_min and margin_max; nil uses the defaults
+--- @param limits table|nil margin bounds, max_chars_per_step and target; nil uses the defaults
 --- @return number|nil the next margin; nil when nothing more can be tried
 function AutoTune.nextMargin(margin, chars, screen_width, limits)
     margin = tonumber(margin)
@@ -70,21 +70,31 @@ function AutoTune.nextMargin(margin, chars, screen_width, limits)
     local margin_min = limits.margin_min or AutoTune.MARGIN_MIN
     local margin_max = limits.margin_max or AutoTune.MARGIN_MAX
     local max_chars = limits.max_chars_per_step or AutoTune.MAX_CHARS_PER_STEP
+    local target = tonumber(limits.target) or AutoTune.TARGET
 
     -- The text block is what the lines are laid out in: how many characters fit on a line is the width
     -- of the block divided by the width of a character. So the length of the lines is proportional to
     -- the width of the block, and the block is the screen minus the margins.
     local text_width = math.max(width - 2 * margin, 1)
-    local aim = chars > AutoTune.BAND_MAX and AutoTune.BAND_MAX or AutoTune.BAND_MIN
-    local wanted_width = text_width * aim / chars
+    local wanted_width = text_width * target / chars
     local wanted_margin = (width - wanted_width) / 2
 
-    -- The step goes where the measurement points, but it never moves the line length by more than a
-    -- few characters at a time: a step that jumped over the band would land outside it again and
-    -- cost another measurement. The bounds the reader set have the last word.
+    -- The step never moves the line length by more than a few characters at a time: a step that jumped
+    -- over the band would land outside it again and cost another measurement.
     local step_width = text_width * max_chars / chars
     local step_margin = math.abs(wanted_margin - margin) <= step_width / 2 and wanted_margin
         or (wanted_margin > margin and margin + step_width / 2 or margin - step_width / 2)
+
+    -- The target may sit outside the band, and the step may land outside it too. The band is what the
+    -- loop stops on, so a step that would leave it aims at the edge of the band instead.
+    local new_width = math.max(width - 2 * step_margin, 1)
+    local new_chars = chars * new_width / text_width
+    if new_chars < AutoTune.BAND_MIN then
+        step_margin = (width - text_width * AutoTune.BAND_MIN / chars) / 2
+    elseif new_chars > AutoTune.BAND_MAX then
+        step_margin = (width - text_width * AutoTune.BAND_MAX / chars) / 2
+    end
+
     local new_margin = math.floor(step_margin + 0.5)
     -- A margin outside the bounds comes back inside them first: the bounds are what the reader asked
     -- for, and a step that stayed outside would measure the same thing again.

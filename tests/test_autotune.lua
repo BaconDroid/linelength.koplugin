@@ -22,10 +22,10 @@ local WIDTH = 632
 
 expect("band min", AutoTune.BAND_MIN, 50)
 expect("band max", AutoTune.BAND_MAX, 60)
-expect("target", AutoTune.TARGET, 60)
 expect("margin min", AutoTune.MARGIN_MIN, 10)
 expect("margin max", AutoTune.MARGIN_MAX, 60)
 expect("characters per step", AutoTune.MAX_CHARS_PER_STEP, 6)
+expect("target", AutoTune.TARGET, 55)
 
 expect("in band: 50", AutoTune.inBand(50), true)
 expect("in band: 60", AutoTune.inBand(60), true)
@@ -57,14 +57,17 @@ local capped = AutoTune.nextMargin(50, 120, WIDTH, { margin_max = 60 })
 expect("the bound stops the margins", capped, 60)
 local uncapped = AutoTune.nextMargin(50, 120, WIDTH, { margin_max = 140 })
 expect("a wider bound lets the margins go further", uncapped > capped, true)
--- A bigger step moves the margins further in one go.
-local bigger_step = AutoTune.nextMargin(10, 80, WIDTH, { max_chars_per_step = 20 })
-expect("a bigger step moves further", bigger_step > wider, true)
+-- The step is bounded in characters: a small step moves the margins a little at a time, a big one
+-- moves them further in the same go.
+local small_step = AutoTune.nextMargin(60, 50, WIDTH, { max_chars_per_step = 2, target = 60 })
+local big_step = AutoTune.nextMargin(60, 50, WIDTH, { max_chars_per_step = 20, target = 60 })
+expect("a bigger step moves further", big_step < small_step, true)
+expect("a small step moves a little", small_step < 60, true)
 
+-- The lines are far too long: the margins go as far as they can, and there is nothing more to try.
 local wanted = AutoTune.nextMargin(10, 80, WIDTH)
-local second = AutoTune.nextMargin(wanted, 80, WIDTH)
-expect("the step is bounded", wanted - 10 <= 25, true)
-expect("the next step goes on", second >= wanted or second == nil, true)
+expect("the margins go to their bound", wanted, 60)
+expectNil("and then there is nothing more to try", AutoTune.nextMargin(wanted, 80, WIDTH))
 
 expectNil("no margin", AutoTune.nextMargin(nil, 60, WIDTH))
 expectNil("no measurement", AutoTune.nextMargin(10, 0, WIDTH))
@@ -101,6 +104,26 @@ local function simulate(start_margin, measured)
     end
     return margin, measured, steps
 end
+
+-- The step aims at the target: the same book, a different target, a different margin.
+local aimed = AutoTune.nextMargin(40, 53, WIDTH, { target = 55 })
+expect("the step aims at the target", aimed < 40, true)
+local aimed60 = AutoTune.nextMargin(40, 53, WIDTH, { target = 60 })
+expect("a higher target means wider margins", aimed60 < aimed, true)
+
+-- A target outside the band does not make the loop wander: the step aims at the edge of the band.
+-- The lines are too long, so the margins widen; a target of 90 would ask for even longer lines, so
+-- the step stops at the edge of the band instead.
+expect("a target above the band aims at the edge", AutoTune.nextMargin(30, 70, WIDTH, { target = 90 }), 60)
+-- The lines are too short, so the margins come in; a target of 20 would ask for even shorter lines.
+expect("a target below the band aims at the edge", AutoTune.nextMargin(50, 40, WIDTH, { target = 20 }), 10)
+
+-- Already at the target: there is nothing to try.
+expectNil("already at the target: nothing to try", AutoTune.nextMargin(10, 55, WIDTH, { target = 55 }))
+
+-- The margins come in when the lines are too short, and widen when they are too long.
+expect("too short: the margins come in", AutoTune.nextMargin(50, 40, WIDTH, { target = 55 }), 10)
+expect("too long: the margins widen", AutoTune.nextMargin(10, 70, WIDTH, { target = 55 }), 54)
 
 local margin, chars, steps = simulate(10, 80)
 expect("the loop ends in the band", AutoTune.inBand(chars), true)

@@ -460,6 +460,7 @@ function LineLength:autoTune(settings)
         margin_min = settings.margin_min,
         margin_max = settings.margin_max,
         max_chars_per_step = settings.max_chars_per_step,
+        target = settings.target,
     }
     local counts = {
         first = settings.sample_first,
@@ -650,6 +651,7 @@ function LineLength:settingsMenu()
         },
         number(_("Shortest line"), "band_min", 1, 30, 80),
         number(_("Longest line"), "band_max", 1, 30, 80),
+        number(_("Target line length"), "target", 1, 30, 100),
         number(_("Smallest margin"), "margin_min", 1, 0, 140),
         number(_("Biggest margin"), "margin_max", 1, 0, 140),
         number(_("Characters per step"), "max_chars_per_step", 1, 1, 30),
