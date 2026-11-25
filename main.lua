@@ -450,17 +450,16 @@ function LineLength:onControl(card, session, id)
 end
 
 -- The auto-tune: measures the line length of a sample of the book and, when it is outside the band the
--- reader asked for, changes the margins (and the text size only when the margins cannot go further)
--- until it is inside. Every step is measured again, so the loop stops on what the book really holds.
+-- reader asked for, moves the margins until it is inside. The size of the text is the reader's own and
+-- is never touched. Every step is measured again, so the loop stops on what the book really holds.
 -- @param settings table the settings, as in linelength/settings.lua
 -- @return table|nil what happened: { steps, chars, changed } ; nil when nothing was done
 function LineLength:autoTune(settings)
     settings = settings or {}
     local limits = {
-        font_min = settings.font_min,
-        font_max = settings.font_max,
         margin_min = settings.margin_min,
         margin_max = settings.margin_max,
+        max_chars_per_step = settings.max_chars_per_step,
     }
     local counts = {
         first = settings.sample_first,
@@ -481,15 +480,15 @@ function LineLength:autoTune(settings)
     if not layout then
         return nil
     end
-    layout = AutoTune.start(layout, limits)
+    local margin = AutoTune.startMargin(layout.margins[1], limits)
 
     while not AutoTune.inBand(chars) and steps < max_steps do
-        local next_layout = AutoTune.next(layout, chars, width, limits)
-        if not next_layout then
+        local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
+        if not next_margin then
             break -- nothing more can be tried: the book is as good as it can get
         end
-        self:applyLayout(next_layout.margins, next_layout.size)
-        layout = next_layout
+        self:applyLayout({ next_margin, next_margin }, nil)
+        margin = next_margin
         changed = true
         steps = steps + 1
         local again = self:measureSample(counts)
@@ -498,7 +497,7 @@ function LineLength:autoTune(settings)
         end
         chars = again.median
     end
-    return { steps = steps, chars = chars, changed = changed }
+    return { steps = steps, chars = chars, changed = changed, margin = margin }
 end
 
 -- The auto-tune when a book opens, if the reader asked for it. It is quiet: a book that is already
@@ -649,14 +648,13 @@ function LineLength:settingsMenu()
         },
         number(_("Shortest line"), "band_min", 1, 30, 80),
         number(_("Longest line"), "band_max", 1, 30, 80),
-        number(_("Smallest text size"), "font_min", 1, 12, 40),
-        number(_("Biggest text size"), "font_max", 1, 12, 40),
         number(_("Smallest margin"), "margin_min", 1, 0, 140),
         number(_("Biggest margin"), "margin_max", 1, 0, 140),
+        number(_("Characters per step"), "max_chars_per_step", 1, 1, 30),
         number(_("Pages at the start"), "sample_first", 1, 0, 20),
         number(_("Pages in the middle"), "sample_middle", 1, 1, 20),
         number(_("Pages at the end"), "sample_last", 1, 0, 20),
-        number(_("Steps at most"), "max_steps", 1, 1, 10),
+        number(_("Steps at most"), "max_steps", 1, 1, 20),
     }
 end
 

@@ -23,10 +23,9 @@ local WIDTH = 632
 expect("band min", AutoTune.BAND_MIN, 50)
 expect("band max", AutoTune.BAND_MAX, 66)
 expect("target", AutoTune.TARGET, 60)
-expect("font min", AutoTune.FONT_MIN, 20)
-expect("font max", AutoTune.FONT_MAX, 27)
 expect("margin min", AutoTune.MARGIN_MIN, 10)
 expect("margin max", AutoTune.MARGIN_MAX, 60)
+expect("characters per step", AutoTune.MAX_CHARS_PER_STEP, 6)
 
 expect("in band: 50", AutoTune.inBand(50), true)
 expect("in band: 60", AutoTune.inBand(60), true)
@@ -42,94 +41,77 @@ expect("distance: too short", AutoTune.distance(45), 5)
 expect("distance: too long", AutoTune.distance(70), -4)
 expect("distance: nothing", AutoTune.distance(nil), 50)
 
-local function layout(margins, size)
-    return { margins = margins, size = size }
+local wider = AutoTune.nextMargin(10, 80, WIDTH)
+expect("too long: the margins widen", wider > 10, true)
+expect("too long: by at least a step", wider >= 12, true)
+
+local narrower = AutoTune.nextMargin(40, 40, WIDTH)
+expect("too short: the margins come in", narrower < 40, true)
+expect("too short: by at least a step", narrower <= 38, true)
+
+expectNil("margins at their limit: nothing to try", AutoTune.nextMargin(60, 100, WIDTH))
+expectNil("margins at their minimum: nothing to try", AutoTune.nextMargin(10, 30, WIDTH))
+
+-- A wide margin and very long lines: the bound is what stops the margins.
+local capped = AutoTune.nextMargin(50, 120, WIDTH, { margin_max = 60 })
+expect("the bound stops the margins", capped, 60)
+local uncapped = AutoTune.nextMargin(50, 120, WIDTH, { margin_max = 140 })
+expect("a wider bound lets the margins go further", uncapped > capped, true)
+-- A bigger step moves the margins further in one go.
+local bigger_step = AutoTune.nextMargin(10, 80, WIDTH, { max_chars_per_step = 20 })
+expect("a bigger step moves further", bigger_step > wider, true)
+
+local wanted = AutoTune.nextMargin(10, 80, WIDTH)
+local second = AutoTune.nextMargin(wanted, 80, WIDTH)
+expect("the step is bounded", wanted - 10 <= 25, true)
+expect("the next step goes on", second >= wanted or second == nil, true)
+
+expectNil("no margin", AutoTune.nextMargin(nil, 60, WIDTH))
+expectNil("no measurement", AutoTune.nextMargin(10, 0, WIDTH))
+expectNil("no measurement, as text", AutoTune.nextMargin(10, "x", WIDTH))
+expectNil("no width", AutoTune.nextMargin(10, 60, nil))
+
+expect("start: a margin below the bound comes up", AutoTune.startMargin(5), 10)
+expect("start: a margin above the bound comes down", AutoTune.startMargin(90), 60)
+expect("start: a margin inside the bounds stays", AutoTune.startMargin(25), 25)
+expect("start: a margin is rounded", AutoTune.startMargin(25.6), 26)
+expect("start: no margin at all", AutoTune.startMargin(nil), 10)
+
+-- The loop the way the plugin runs it: the margins move by steps, each one measured, until the line
+-- length is in the band. The screen is 632 units wide.
+-- The characters a line holds, from the real relation measured on a book: a line of 59 characters
+-- in a block of 612 units. The block is the screen minus the margins.
+local function chars_in(block)
+    return math.floor(block * 59 / 612 + 0.5)
 end
 
-local next = AutoTune.next(layout({ 10, 10 }, 20), 75, WIDTH)
-expect("too long: margins", next and next.margins[1], 47)
-expect("too long: margins are even", next and next.margins[2], next and next.margins[1])
-expect("too long: the text size does not move", next and next.size, 20)
-
-local wider = AutoTune.next(layout({ 30, 30 }, 20), 45, WIDTH)
-expect("too short: margins", wider and wider.margins[1], 10)
-expect("too short: the text size does not move", wider and wider.size, 20)
-
-local bigger = AutoTune.next(layout({ 60, 60 }, 20), 100, WIDTH)
-expect("margins at their limit: the text size grows", bigger and bigger.size, 27)
-expect("margins at their limit: the margins stay", bigger and bigger.margins[1], 60)
-
-expectNil("both at their limit: nothing to try", AutoTune.next(layout({ 60, 60 }, 27), 100, WIDTH))
-
-expectNil("text size at its limit, lines too short", AutoTune.next(layout({ 10, 10 }, 20), 40, WIDTH))
-
-expectNil("in the band: no next step", AutoTune.next(layout({ 10, 10 }, 20), 58, WIDTH))
-
-local clamped = AutoTune.next(layout({ 10, 10 }, 20), 200, WIDTH)
-expect("a very long line: the margins stop at their limit", clamped and clamped.margins[1], 60)
-local clamped2 = AutoTune.next(layout({ 10, 10 }, 20), 20, WIDTH)
-expectNil("a very short line at the smallest text: nothing to try", clamped2)
-
-local only_size = AutoTune.next(layout({ 10, 10 }, 20), 66.5, WIDTH)
-expect("the lines are just over the band: the margins grow", only_size and only_size.size, 20)
-expect("the lines are just over the band: the margins move", only_size and only_size.margins[1], 13)
-
-local custom = AutoTune.next(layout({ 10, 10 }, 20), 75, WIDTH,
-    { font_min = 24, font_max = 30, margin_min = 15, margin_max = 40 })
-expect("custom limits: the margins stop at 40", custom and custom.margins[1], 40)
-local custom2 = AutoTune.next(layout({ 40, 40 }, 24), 100, WIDTH,
-    { font_min = 24, font_max = 30, margin_min = 15, margin_max = 40 })
-expect("custom limits: the text size stops at 30", custom2 and custom2.size, 30)
-
-expectNil("no layout", AutoTune.next(nil, 60, WIDTH))
-expectNil("no margins", AutoTune.next({ size = 20 }, 60, WIDTH))
-expectNil("no size", AutoTune.next({ margins = { 10, 10 } }, 60, WIDTH))
-expectNil("no width", AutoTune.next(layout({ 10, 10 }, 20), 60, nil))
-expectNil("no measurement", AutoTune.next(layout({ 10, 10 }, 20), 0, WIDTH))
-expectNil("no measurement, as text", AutoTune.next(layout({ 10, 10 }, 20), "x", WIDTH))
-
-local start = AutoTune.start(layout({ 5, 5 }, 22))
-expect("start: margins below the limit come up", start.margins[1], 10)
-expect("start: the text size inside the limits stays", start.size, 22)
-local start2 = AutoTune.start(layout({ 90, 90 }, 40))
-expect("start: margins above the limit come down", start2.margins[1], 60)
-expect("start: the text size above the limit comes down", start2.size, 27)
-local start3 = AutoTune.start(layout({ 15.6, 15.2 }, 22.4))
-expect("start: margins are rounded", start3.margins[1], 16)
-expect("start: the text size is rounded", start3.size, 22)
-
-local function simulate(start_layout, measured)
-    local current = AutoTune.start(start_layout)
+local function simulate(start_margin, measured)
+    local margin = AutoTune.startMargin(start_margin)
     local steps = 0
-    while not AutoTune.inBand(measured) and steps < 10 do
-        local next_layout = AutoTune.next(current, measured, WIDTH)
-        if not next_layout then break end
-        local before = WIDTH - current.margins[1] - current.margins[2]
-        local after = WIDTH - next_layout.margins[1] - next_layout.margins[2]
-        local size_before = current.size
-        current = next_layout
+    while not AutoTune.inBand(measured) and steps < 20 do
+        local next_margin = AutoTune.nextMargin(margin, measured, WIDTH)
+        if not next_margin then break end
+        margin = next_margin
         steps = steps + 1
-        -- The text block got narrower or wider, and the lines hold proportionally more or fewer
-        -- characters, as long as the text size did not change.
-        measured = math.floor(measured * after / before * size_before / current.size + 0.5)
+        measured = chars_in(WIDTH - 2 * margin)
     end
-    return current, measured, steps
+    return margin, measured, steps
 end
 
-local tuned, tuned_chars, tuned_steps = simulate(layout({ 10, 10 }, 20), 75)
-expect("the loop ends in the band", AutoTune.inBand(tuned_chars), true)
-expect("the loop ends in one or two steps", tuned_steps <= 2, true)
-expect("the loop kept the text size", tuned.size, 20)
-expect("the loop widened the margins", tuned.margins[1] > 10, true)
+local margin, chars, steps = simulate(10, 80)
+expect("the loop ends in the band", AutoTune.inBand(chars), true)
+expect("the loop ends in a few steps", steps <= 3, true)
+expect("the loop widened the margins", margin > 10, true)
+expect("the loop stayed inside the bounds", margin <= 60, true)
 
--- Lines too short: the margins come in, and the text size drops to its floor when they cannot.
-local tuned2, tuned2_chars = simulate(layout({ 10, 10 }, 26), 38)
-expect("the loop made the lines longer", tuned2_chars > 38, true)
-expect("the loop kept the text size at or above its floor", tuned2.size >= 20, true)
-expect("the loop brought the margins in", tuned2.margins[1] <= 10, true)
--- A book whose lines are too short to ever reach the band: the smallest text and the narrowest
--- margins cannot make a line longer. The step stops instead of looping for ever.
-expectNil("lines too short to reach the band: nothing to try", AutoTune.next(layout({ 10, 10 }, 20), 40, WIDTH))
+local margin2, chars2, steps2 = simulate(60, 40)
+expect("the loop ends in the band from the other side", AutoTune.inBand(chars2), true)
+expect("the loop brought the margins in", margin2 < 60, true)
+expect("the loop ends in a few steps there too", steps2 <= 3, true)
+
+-- A book whose lines cannot reach the band at any margin: the loop stops instead of going for ever.
+local margin3, chars3, steps3 = simulate(60, 90)
+expect("an unreachable band stops the loop", steps3 < 20, true)
 
 if failures > 0 then
     error(failures .. " autotune test(s) failed")

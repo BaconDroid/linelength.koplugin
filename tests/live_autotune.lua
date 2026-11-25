@@ -102,20 +102,23 @@ plugin:init()
 local settings = {
     enabled = true,
     band_min = 50, band_max = 66, target = 60,
-    font_min = 20, font_max = 27,
     margin_min = 10, margin_max = 60,
+    max_chars_per_step = 6,
     sample_first = 0, sample_middle = 6, sample_last = 0,
-    max_steps = 4,
+    max_steps = 6,
 }
 
 -- The book starts badly set up: a big text on wide margins makes the lines too short.
-layout.h_page_margins = { 40, 40 }
-layout.font_size = 26
+layout.font_size = 22
 if os.getenv("START") == "long" then
-    -- The other way round: a small text on wide margins makes the lines too long.
-    layout.h_page_margins = { 10, 10 }
-    layout.font_size = 14
+    -- A small text on narrow margins makes the lines too long.
+    layout.h_page_margins = { 0, 0 }
+    layout.font_size = 16
+else
+    -- Wide margins make the lines too short.
+    layout.h_page_margins = { 60, 60 }
 end
+local start_font = layout.font_size
 doc:setPageMargins(Screen:scaleBySize(layout.h_page_margins[1]), Screen:scaleBySize(10),
     Screen:scaleBySize(layout.h_page_margins[2]), Screen:scaleBySize(10))
 doc:setFontSize(Screen:scaleBySize(layout.font_size))
@@ -147,22 +150,34 @@ print(string.format("layout now: margins %d/%d, text size %d", layout.h_page_mar
     layout.h_page_margins[2], layout.font_size))
 
 check("the auto-tune changed the layout", result.changed == true, tostring(result.changed))
-check("the line length is now in the band", AutoTune.inBand(result.chars), tostring(result.chars))
+-- A small text can make the band unreachable: the margins alone cannot shorten the lines enough.
+-- The tune then goes as far as the margins go and stops there.
+local band_reachable = not (os.getenv("START") == "long")
+if band_reachable then
+    check("the line length is now in the band", AutoTune.inBand(result.chars), tostring(result.chars))
+else
+    check("the tune went as far as the margins go", layout.h_page_margins[1] == settings.margin_max,
+        tostring(layout.h_page_margins[1]))
+    check("and the line length is as short as it can be", result.chars > AutoTune.BAND_MAX,
+        tostring(result.chars))
+end
 check("it took a few steps", result.steps <= settings.max_steps, result.steps .. " steps")
 if os.getenv("START") == "long" then
-    check("the margins went out", layout.h_page_margins[1] > 10, tostring(layout.h_page_margins[1]))
+    check("the margins went out", layout.h_page_margins[1] > 0, tostring(layout.h_page_margins[1]))
 else
-    check("the margins came in", layout.h_page_margins[1] < 40, tostring(layout.h_page_margins[1]))
+    check("the margins came in", layout.h_page_margins[1] < 60, tostring(layout.h_page_margins[1]))
 end
 check("the margins are even", layout.h_page_margins[1] == layout.h_page_margins[2])
-check("the text size only moved when the margins could not", layout.font_size < 26 or layout.h_page_margins[1] < 10,
-    "margins " .. tostring(layout.h_page_margins[1]) .. ", size " .. tostring(layout.font_size))
-check("the text size stayed inside its limits", layout.font_size >= settings.font_min and layout.font_size <= settings.font_max,
-    tostring(layout.font_size))
+check("the text size was never touched", layout.font_size == start_font,
+    tostring(layout.font_size) .. " instead of " .. tostring(start_font))
+check("the margins are inside their bounds", layout.h_page_margins[1] >= settings.margin_min
+    and layout.h_page_margins[1] <= settings.margin_max, tostring(layout.h_page_margins[1]))
 
 local after = plugin:measureSample()
 check("the book measures the same afterwards", after ~= nil and after.median == result.chars,
     tostring(after and after.median) .. " vs " .. tostring(result.chars))
+check("the text size is still the one the reader chose", layout.font_size == start_font,
+    tostring(layout.font_size))
 -- The layout changed, so the book is laid out again and the page numbers move: the reader stays on
 -- the same place in the text, not on the same page number.
 check("the reader is still in the book", doc:getCurrentPage() >= 1 and doc:getCurrentPage() <= doc:getPageCount(),

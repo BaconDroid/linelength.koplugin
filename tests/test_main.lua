@@ -1297,12 +1297,11 @@ local function tests_sample()
     expect("the band starts at 50", settings.band_min, 50)
     expect("the band ends at 66", settings.band_max, 66)
     expect("the target is 60", settings.target, 60)
-    expect("the text size starts at 20", settings.font_min, 20)
     expect("the margins start at 10", settings.margin_min, 10)
     expect("six pages in the middle", settings.sample_middle, 6)
     expect("no pages at the start", settings.sample_first, 0)
     expect("no pages at the end", settings.sample_last, 0)
-    expect("four steps at most", settings.max_steps, 4)
+    expect("six steps at most", settings.max_steps, 6)
 
     settings.enabled = true
     Settings:write(settings)
