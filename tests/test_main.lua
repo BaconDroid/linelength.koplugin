@@ -7,6 +7,16 @@ local screen_state = { raises = false, scale_raises = false } -- raises: asking 
 local details_opts = {}           -- what the card was asked to show
 local actions = {}                -- Dispatcher actions registered
 
+-- KOReader keeps a plugin's settings in the reader's own settings file, reached through this global.
+-- A table of key and value stands in for it here.
+G_reader_settings = {
+    data = {},
+    readSetting = function(self, key) return self.data[key] end,
+    isTrue = function(self, key) return self.data[key] == true end,
+    saveSetting = function(self, key, value) self.data[key] = value end,
+    flush = function() end,
+}
+
 local function extend(base, t)
     t = t or {}
     t.__index = t
@@ -1230,26 +1240,15 @@ local function tests_autotune()
     -- two differ here, since the margins moved from 30 to 50.
     expect("the count is the one of the last layout", result.chars, 120 - applied[#applied][1])
 
-    -- The band given to the loop is the one it stops on: with a band of 65 to 70 and a book
-    -- that measures 58, the loop keeps going, although the default band of 56 to 60 would have called
-    -- the book done and left it alone.
+    -- The band is the auto-tune's own, so a bag of settings cannot move it: a book that measures 58
+    -- is inside it even when the rest of the settings say otherwise.
     result, applied = tuneBook({
         margins = { 40, 40 },
         settings = { band_min = 65, band_max = 70, target = 68 },
         measure = function() return 58 end,
     })
-    expect("a book below the configured band is tuned", #applied > 0, true)
-    expect("and it is reported as changed", result and result.changed, true)
-
-    -- A book that measures 68 is inside that band: the loop leaves it alone, although the default
-    -- band of 56 to 60 would have found it too long.
-    result, applied = tuneBook({
-        margins = { 40, 40 },
-        settings = { band_min = 65, band_max = 70, target = 68 },
-        measure = function() return 68 end,
-    })
-    expect("a book in the configured band is left alone", #applied, 0)
-    expect("and its count is reported", result and result.chars, 68)
+    expect("the band is the auto-tune's own", #applied, 0)
+    expect("and its count is reported", result and result.chars, 58)
     expect("nothing is reported as changed", result and result.changed, false)
 
     -- The same book with the default band is out of it, so the margins move.
@@ -1469,18 +1468,24 @@ local function tests_sample()
     expect("current page sampled: nothing is refreshed on the screen", repaints.n, 0)
 
     -- 13. the auto-tune: the settings, the switch, and the numbers in the menu.
-    local Settings = require("linelength/settings")
-    local settings = Settings:read()
+    G_reader_settings.data = {}
+    local settings_plugin = LineLength:new{ document = {}, ui = { menu = newMenu(), highlight = newHighlight() } }
+    settings_plugin:init()
+    local settings = settings_plugin:settings()
     expect("the auto-tune is off by default", settings.enabled, false)
     expect("the margins start at 10", settings.margin_min, 10)
     expect("the margins end at 50", settings.margin_max, 50)
 
-    settings.enabled = true
-    Settings:write(settings)
-    expect("the settings are kept", Settings:read().enabled, true)
-    expect("and the numbers with them", Settings:read().margin_max, 50)
-    settings.enabled = false
-    Settings:write(settings)
+    -- A reader who set the three in the build that kept them in a file of its own finds them still
+    -- set: they are read from that file once and kept in the reader's settings from then on.
+    plugin_settings.settings = { enabled = true, margin_min = 22, margin_max = 38 }
+    G_reader_settings.data = {}
+    local migrated = settings_plugin:settings()
+    expect("the old switch is kept", migrated.enabled, true)
+    expect("the old smallest margin is kept", migrated.margin_min, 22)
+    expect("the old biggest margin is kept", migrated.margin_max, 38)
+    expect("and it is written in the reader's settings", G_reader_settings.data.linelength_margin_max, 38)
+    plugin_settings.settings = {}
 
     -- The auto-tune does nothing when the reader has not asked for it. The book is opened at its start,
     -- which is the only place the tune runs.
@@ -1490,15 +1495,22 @@ local function tests_sample()
     local auto_plugin = LineLength:new{ document = {}, ui = { menu = newMenu(), highlight = newHighlight(),
         document = auto_doc } }
     auto_plugin:init()
-    local called = false
-    auto_plugin.autoTune = function() called = true end
-    local real_read = Settings.read
-    Settings.read = function(self) return { enabled = false } end
+    local called, tuned_with = false, nil
+    auto_plugin.autoTune = function(_self, settings) called = true; tuned_with = settings end
+    G_reader_settings.data = {}
     auto_plugin:onReaderReady()
     expect("the auto-tune stays off when it is not asked for", called, false)
-    Settings.read = function(self) return { enabled = true } end
+    G_reader_settings.data = { linelength_auto_tune = true }
     auto_plugin:onReaderReady()
     expect("the auto-tune runs when it is asked for", called, true)
+    expect("and it is given the margins the reader chose", tuned_with and tuned_with.margin_min, 10)
+
+    -- The automatic tune is given the reader's margins and not the defaults: a book opened at its
+    -- start is tuned with the bounds the reader set.
+    G_reader_settings.data = { linelength_auto_tune = true, linelength_margin_min = 20, linelength_margin_max = 26 }
+    auto_plugin:onReaderReady()
+    expect("the automatic tune reads the margins from the reader", tuned_with and tuned_with.margin_min, 20)
+    expect("the automatic tune reads the margins from the reader", tuned_with and tuned_with.margin_max, 26)
 
     -- It runs when the book is opened at its start, and nowhere else: a book picked up where it was
     -- left keeps the layout the reader is reading it with.
@@ -1516,7 +1528,7 @@ local function tests_sample()
     gate_doc.current = 2
     gate_plugin:onReaderReady()
     expect("a book opened anywhere else is left alone", gate_called, false)
-    Settings.read = real_read
+    G_reader_settings.data = {}
 
     -- The action that tunes the book now says what came of it, and says so when it could not be done.
     local tune_plugin = LineLength:new{ document = {}, ui = { menu = newMenu(), highlight = newHighlight() } }
@@ -1554,11 +1566,11 @@ local function tests_sample()
     expect("the settings menu has the numbers", found_numbers, 2)
 
     -- The switch flips the setting and keeps it.
-    local before = Settings:read().enabled
+    local before = settings_plugin:settings().enabled
     menu[1].callback()
-    expect("the switch flips the setting", Settings:read().enabled, not before)
+    expect("the switch flips the setting", settings_plugin:settings().enabled, not before)
     menu[1].callback()
-    expect("and flips it back", Settings:read().enabled, before)
+    expect("and flips it back", settings_plugin:settings().enabled, before)
 
     -- A number goes up and down by one.
     local margin_item = nil
@@ -1569,11 +1581,11 @@ local function tests_sample()
         end
     end
     expect("the biggest margin is in the menu", margin_item ~= nil, true)
-    local value = Settings:read().margin_max
+    local value = settings_plugin:settings().margin_max
     margin_item.sub_item_table[2].callback()
-    expect("a number goes up by one", Settings:read().margin_max, value + 1)
+    expect("a number goes up by one", settings_plugin:settings().margin_max, value + 1)
     margin_item.sub_item_table[1].callback()
-    expect("and back down", Settings:read().margin_max, value)
+    expect("and back down", settings_plugin:settings().margin_max, value)
 
     -- The two ends of a pair never cross: the smallest margin cannot go past the biggest one.
     -- The menu reads the settings when it is built, so it is built again for each case.
@@ -1583,20 +1595,20 @@ local function tests_sample()
         end
     end
     -- The margins.
-    Settings:write({ margin_min = 50, margin_max = 50 })
+    G_reader_settings.data = { linelength_margin_min = 50, linelength_margin_max = 50 }
     local biggest = menuItem("Biggest margin")
     expect("the biggest margin is in the menu", biggest ~= nil, true)
     biggest.sub_item_table[1].callback()
-    expect("the biggest margin does not go below the smallest one", Settings:read().margin_max, 50)
+    expect("the biggest margin does not go below the smallest one", settings_plugin:settings().margin_max, 50)
     expect("and the step that would do it is not offered", biggest.sub_item_table[1].enabled_func(), false)
-    Settings:write({ margin_min = 20, margin_max = 20 })
+    G_reader_settings.data = { linelength_margin_min = 20, linelength_margin_max = 20 }
     local smallest = menuItem("Smallest margin")
     expect("the smallest margin is in the menu", smallest ~= nil, true)
     smallest.sub_item_table[2].callback()
-    expect("the smallest margin does not go above the biggest one", Settings:read().margin_min, 20)
+    expect("the smallest margin does not go above the biggest one", settings_plugin:settings().margin_min, 20)
     expect("and the step that would do it is not offered", smallest.sub_item_table[2].enabled_func(), false)
     -- The settings are put back as they were.
-    Settings:write(settings)
+    G_reader_settings.data = {}
 end
 
 tests_autotune()

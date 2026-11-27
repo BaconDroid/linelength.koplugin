@@ -23,7 +23,6 @@ local Rating = require("linelength/rating")
 local Report = require("linelength/report")
 local Sample = require("linelength/sample")
 local AutoTune = require("linelength/autotune")
-local Settings = require("linelength/settings")
 
 local LineLength = WidgetContainer:extend{
     name = "linelength",
@@ -591,8 +590,8 @@ end
 -- its first page: a book that is already within the band keeps the margins it has, and nothing is
 -- shown when there was nothing to do.
 function LineLength:onReaderReady()
-    local ok, settings = pcall(function() return Settings:read() end)
-    if not ok or not settings.enabled then
+    local settings = self:settings()
+    if not settings.enabled then
         return
     end
     -- ReaderRolling schedules its partial rerendering a tick after it is ready, not before. Measuring
@@ -703,10 +702,7 @@ end
 -- Tunes the book now, and says what came of it. The book is measured again even when it is already
 -- within the band: this is the action the reader reaches for when a book does not look right.
 function LineLength:tuneNow()
-    local ok, settings = pcall(function() return Settings:read() end)
-    if not ok then
-        return
-    end
+    local settings = self:settings()
     UIManager:show(InfoMessage:new{ text = _("Tuning..."), timeout = 1 })
     UIManager:tickAfterNext(function()
         local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
@@ -763,12 +759,58 @@ function LineLength:onLinelengthPage()
     return true
 end
 
+-- What the reader chose for the auto-tune: the switch, and how far the margins may go. These are the
+-- only three, and they are kept the way KOReader keeps a plugin's settings, in the reader's own
+-- settings file.
+function LineLength:settings()
+    local enabled = G_reader_settings:readSetting("linelength_auto_tune")
+    local margin_min = tonumber(G_reader_settings:readSetting("linelength_margin_min"))
+    local margin_max = tonumber(G_reader_settings:readSetting("linelength_margin_max"))
+    if enabled == nil and not margin_min and not margin_max then
+        return self:migrateLegacySettings()
+    end
+    return {
+        enabled = enabled == true,
+        margin_min = margin_min or AutoTune.MARGIN_MIN,
+        margin_max = margin_max or AutoTune.MARGIN_MAX,
+    }
+end
+
+-- A build of this branch kept the same three in a settings file of its own, linelength.lua. They are
+-- read once here and kept in the reader's settings from then on, so that a reader who had set them
+-- does not find them gone.
+function LineLength:migrateLegacySettings()
+    local settings = {
+        enabled = false,
+        margin_min = AutoTune.MARGIN_MIN,
+        margin_max = AutoTune.MARGIN_MAX,
+    }
+    local ok, legacy = pcall(function()
+        local DataStorage = require("datastorage")
+        local LuaSettings = require("luasettings")
+        return LuaSettings:open(DataStorage:getSettingsDir() .. "/linelength.lua"):readSetting("settings")
+    end)
+    if ok and type(legacy) == "table" then
+        settings.enabled = legacy.enabled == true
+        settings.margin_min = tonumber(legacy.margin_min) or settings.margin_min
+        settings.margin_max = tonumber(legacy.margin_max) or settings.margin_max
+    end
+    G_reader_settings:saveSetting("linelength_auto_tune", settings.enabled)
+    G_reader_settings:saveSetting("linelength_margin_min", settings.margin_min)
+    G_reader_settings:saveSetting("linelength_margin_max", settings.margin_max)
+    G_reader_settings:flush()
+    return settings
+end
+
 -- The settings of the auto-tune, as a menu: a switch, and the numbers that decide what it does.
 -- Each number is a step of 1, and the menu shows what it is set to now.
 function LineLength:settingsMenu()
-    local settings = Settings:read()
+    local settings = self:settings()
     local function save()
-        Settings:write(settings)
+        G_reader_settings:saveSetting("linelength_auto_tune", settings.enabled)
+        G_reader_settings:saveSetting("linelength_margin_min", settings.margin_min)
+        G_reader_settings:saveSetting("linelength_margin_max", settings.margin_max)
+        G_reader_settings:flush()
     end
     -- A number, with a step of one. The bounds a number is given here are its own. A number that is
     -- one end of a pair also gets the other end of the pair as a bound, so that the two can never

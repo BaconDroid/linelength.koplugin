@@ -58,17 +58,16 @@ Thanks to the reddit user [Zanzel_Melancthones](https://www.reddit.com/user/Zanz
 
 ## Tuning a book by itself
 
-Two more entries in the Typeset menu:
+Three more entries in the Typeset menu:
 
 - **Line length: this book (sample)** measures the longest line of a few pages of the book and
   reports the median, the shortest and the longest. The pages are read off screen, so the e-ink
   panel does not move and the reader keeps its place.
 - **Line length: tune this book** moves the margins of the book until the lines hold the length the
   auto-tune aims for, and says what came of it.
+- **Line length: settings** holds what the reader chooses for the tuning, below.
 
-Both are also actions, so they can be put on a gesture.
-
-**Line length: settings** holds what the reader chooses for the tuning:
+The sample and the tune are also actions, so they can be put on a gesture.
 
 | Setting                     | What it means                                     | Default |
 |:----------------------------|:--------------------------------------------------|--------:|

@@ -3,7 +3,7 @@
 -- See tests/render.lua for how to get a KOReader build to run this with:
 --   cd <koreader>/lib/koreader
 --   HOME=<empty dir> PLUGIN_DIR=<this repo> BOOK=<file.epub> SDL_VIDEODRIVER=dummy \
---     EMULATE_READER_W=1264 EMULATE_READER_H=1680 EMULATE_READER_DPI=300 ./luajit <this repo>/tests/live_autotune.lua
+--     EMULATE_READER_W=1264 EMULATE_READER_H=1680 EMULATE_READER_DPI=300 ./luajit <this repo>/tests/autotune.lua
 io.stdout:setvbuf("line")
 os.setlocale("C", "numeric")
 require("setupkoenv")
@@ -99,14 +99,19 @@ end
 local plugin = LineLength:new{ document = doc, ui = ui }
 plugin:init()
 
--- The settings the plugin reads: the harness has no KOReader settings file, so the switch is turned
--- on here, the way a reader would turn it on. Nothing else is given: the band, the target, the step
--- and the sample are the tune's own, and the test must take them from the plugin rather than carry
--- its own copy of them, or a change to the tune would leave the test checking the old numbers.
-local Settings = require("linelength/settings")
-local settings = { enabled = true }
-Settings.read = function() return settings end
-local limits = AutoTune.limits(settings)
+-- The switch is turned on here, the way a reader turns it on: in the reader's own settings. Nothing
+-- else is given, because nothing else is a setting: the band, the target, the step and the sample are
+-- the tune's own, and the test takes them from the plugin rather than carrying its own copy, so that
+-- a change to the tune cannot leave the test checking the old numbers.
+--
+-- The three keys are cleared first: the settings file outlives a run, so a margin left there by an
+-- earlier one would decide this test's bounds.
+G_reader_settings:delSetting("linelength_auto_tune")
+G_reader_settings:delSetting("linelength_margin_min")
+G_reader_settings:delSetting("linelength_margin_max")
+G_reader_settings:saveSetting("linelength_auto_tune", true)
+G_reader_settings:flush()
+local limits = AutoTune.limits(plugin:settings())
 
 -- The book starts badly set up: a big text on wide margins makes the lines too short.
 layout.font_size = tonumber(os.getenv("FONT")) or 22
