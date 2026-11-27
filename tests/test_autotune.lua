@@ -78,6 +78,15 @@ expect("a setting that is not a number falls back", text.band_min, AutoTune.BAND
 expect("a setting that is not a number falls back", text.margin_max, AutoTune.MARGIN_MAX)
 expect("a setting that is not a number falls back", text.max_chars_per_step, AutoTune.MAX_CHARS_PER_STEP)
 
+-- The steps are held to the range the menu offers: a hand-edited file cannot make the loop run a
+-- thousand times, and the default is the one the menu's stepper starts from.
+expect("the steps at most default", AutoTune.MAX_STEPS, 6)
+expect("the steps at most ceiling is the menu's upper bound", AutoTune.STEPS_CEILING, 20)
+expect("the steps from the settings", AutoTune.limits({ max_steps = 1000 }).max_steps, AutoTune.STEPS_CEILING)
+expect("a step count below one becomes one", AutoTune.limits({ max_steps = 0 }).max_steps, AutoTune.STEPS_FLOOR)
+expect("a step count that is not a number falls back", AutoTune.limits({ max_steps = "x" }).max_steps, AutoTune.MAX_STEPS)
+expect("the steps without settings", AutoTune.limits().max_steps, AutoTune.MAX_STEPS)
+
 -- The target is the length the loop aims at, and the band is what it stops on: a target outside the
 -- band is brought to the edge, so it cannot pull the loop past the band.
 local off_target = AutoTune.limits({ band_min = 56, band_max = 60, target = 90 })

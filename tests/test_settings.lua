@@ -68,6 +68,17 @@ expect("the settings that were stored are read back", with_stored.band_max, 60)
 expect("the settings that were stored are read back", with_stored.band_min, 58)
 expect("and the ones that were not stored come from the defaults", with_stored.target, 58)
 
+-- The settings file is a plain Lua table, so the whole of what sits under the key can be written
+-- wrong: a value that is not a table falls back to the defaults rather than raising.
+stored.settings = 42
+local from_number = Settings:read()
+expect("the settings that are not a table fall back", from_number.enabled, false)
+expect("the settings that are not a table fall back", from_number.band_min, 56)
+expect("the settings that are not a table fall back", from_number.target, 58)
+
+stored.settings = "nope"
+expect("the settings that are not a table fall back", Settings:read().band_min, 56)
+
 if failures > 0 then
     error(failures .. " settings test(s) failed")
 end

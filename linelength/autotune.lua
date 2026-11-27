@@ -32,6 +32,11 @@ AutoTune.MARGIN_FLOOR = 0
 AutoTune.MARGIN_CEILING = 200
 AutoTune.STEP_FLOOR = 1
 AutoTune.STEP_CEILING = 30
+-- How many re-renders the tune may take, held to the range the menu's stepper offers so that a
+-- hand-edited settings file cannot make the loop run a thousand times.
+AutoTune.STEPS_FLOOR = 1
+AutoTune.STEPS_CEILING = 20
+AutoTune.MAX_STEPS = 6
 
 -- A number from the settings, kept inside the range the menu offers: the settings file is a plain
 -- Lua table a reader can edit, so a value outside the range is not a reason to stop.
@@ -53,6 +58,7 @@ local function resolved(limits)
         margin_min = limits.margin_min or AutoTune.MARGIN_MIN,
         margin_max = limits.margin_max or AutoTune.MARGIN_MAX,
         max_chars_per_step = limits.max_chars_per_step or AutoTune.MAX_CHARS_PER_STEP,
+        max_steps = limits.max_steps or AutoTune.MAX_STEPS,
     }
 end
 
@@ -60,7 +66,7 @@ end
 --- inside it, the bounds of the margins and the size of a step, checked against each other so that
 --- the loop always has something to aim for.
 --- @param settings table|nil the settings, as in linelength/settings.lua
---- @return table { band_min, band_max, target, margin_min, margin_max, max_chars_per_step }
+--- @return table { band_min, band_max, target, margin_min, margin_max, max_chars_per_step, max_steps }
 function AutoTune.limits(settings)
     settings = settings or {}
     local limits = resolved({
@@ -70,6 +76,7 @@ function AutoTune.limits(settings)
         margin_max = within(settings.margin_max, nil, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING),
         target = within(settings.target, nil, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING),
         max_chars_per_step = within(settings.max_chars_per_step, nil, AutoTune.STEP_FLOOR, AutoTune.STEP_CEILING),
+        max_steps = within(settings.max_steps, nil, AutoTune.STEPS_FLOOR, AutoTune.STEPS_CEILING),
     })
     -- The reader can leave a pair the wrong way round in the settings file: the shortest line cannot be
     -- longer than the longest one, so the pair is put the right way round here.

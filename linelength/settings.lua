@@ -28,6 +28,11 @@ function Settings:read()
         self.settings_obj = LuaSettings:open(DataStorage:getSettingsDir() .. "/linelength.lua")
     end
     local stored = self.settings_obj:readSetting("settings", {})
+    -- The settings file is a plain Lua table the reader can edit by hand, so what sits under the key
+    -- can be anything: a value that is not a table falls back to the defaults rather than raising.
+    if type(stored) ~= "table" then
+        stored = {}
+    end
     local settings = {}
     for key, value in pairs(Settings.DEFAULTS) do
         settings[key] = stored[key]
