@@ -34,17 +34,17 @@ expect("out of band: 61", AutoTune.inBand(61), false)
 expect("out of band: nothing", AutoTune.inBand(nil), false)
 expect("out of band: text", AutoTune.inBand("x"), false)
 
--- The limits of the tune come from the settings the reader chose, and the helpers use them: a band
--- the reader set is the band the loop stops on, not the default one.
+-- The limits of the tune come from the table given to it, and the helpers use them: a band the
+-- caller sets is the band the loop stops on, not the default one.
 local limits = AutoTune.limits({ band_min = 65, band_max = 70, target = 68, margin_min = 10, margin_max = 90 })
 expect("the band from the settings", limits.band_min, 65)
 expect("the band from the settings", limits.band_max, 70)
 expect("the target from the settings", limits.target, 68)
 expect("the margins from the settings", limits.margin_min, 10)
 expect("the margins from the settings", limits.margin_max, 90)
-expect("in the band the reader asked for", AutoTune.inBand(68, limits), true)
-expect("out of the band the reader asked for", AutoTune.inBand(61, limits), false)
-expect("out of the band the reader asked for", AutoTune.inBand(71, limits), false)
+expect("in the band given", AutoTune.inBand(68, limits), true)
+expect("out of the band given", AutoTune.inBand(61, limits), false)
+expect("out of the band given", AutoTune.inBand(71, limits), false)
 expect("the defaults without settings", AutoTune.limits().band_min, AutoTune.BAND_MIN)
 expect("the defaults without settings", AutoTune.limits().margin_max, AutoTune.MARGIN_MAX)
 
@@ -94,7 +94,7 @@ expect("a target above the band comes to its edge", off_target.target, 60)
 local under_target = AutoTune.limits({ band_min = 56, band_max = 60, target = 20 })
 expect("a target below the band comes to its edge", under_target.target, 56)
 
--- The step aims at the band the reader asked for, not at the default one: with a band of 65 to 70
+-- The step aims at the band given to it, not at the default one: with a band of 65 to 70
 -- and a target of 68, the lines are made longer towards 68, and the margins come in. With the
 -- default band of 56 to 60 the same lines would go the other way, towards 58.
 local aimed_band = AutoTune.nextMargin(30, 72, WIDTH, limits)

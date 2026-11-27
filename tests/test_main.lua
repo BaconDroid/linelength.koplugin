@@ -1186,7 +1186,6 @@ local function tests_autotune()
         local settings = {
             band_min = 56, band_max = 60, target = 58,
             margin_min = 20, margin_max = 50, max_chars_per_step = 6,
-            sample_first = 0, sample_middle = 6, sample_last = 0, max_steps = 6,
         }
         for key, value in pairs(opts.settings or {}) do settings[key] = value end
         return tuned:autoTune(settings), applied
@@ -1229,7 +1228,7 @@ local function tests_autotune()
     -- two differ here, since the margins moved from 30 to 50.
     expect("the count is the one of the last layout", result.chars, 120 - applied[#applied][1])
 
-    -- The band the reader asked for is the one the loop stops on: with a band of 65 to 70 and a book
+    -- The band given to the loop is the one it stops on: with a band of 65 to 70 and a book
     -- that measures 58, the loop keeps going, although the default band of 56 to 60 would have called
     -- the book done and left it alone.
     result, applied = tuneBook({
@@ -1471,18 +1470,13 @@ local function tests_sample()
     local Settings = require("linelength/settings")
     local settings = Settings:read()
     expect("the auto-tune is off by default", settings.enabled, false)
-    expect("the band starts at 56", settings.band_min, 56)
-    expect("the band ends at 60", settings.band_max, 60)
-    expect("the target is 58", settings.target, 58)
     expect("the margins start at 10", settings.margin_min, 10)
-    expect("six pages in the middle", settings.sample_middle, 6)
-    expect("no pages at the start", settings.sample_first, 0)
-    expect("no pages at the end", settings.sample_last, 0)
-    expect("six steps at most", settings.max_steps, 6)
+    expect("the margins end at 50", settings.margin_max, 50)
 
     settings.enabled = true
     Settings:write(settings)
     expect("the settings are kept", Settings:read().enabled, true)
+    expect("and the numbers with them", Settings:read().margin_max, 50)
     settings.enabled = false
     Settings:write(settings)
 
@@ -1555,7 +1549,7 @@ local function tests_sample()
         end
     end
     expect("the settings menu has the switch", found_switch, true)
-    expect("the settings menu has the numbers", found_numbers >= 8, true)
+    expect("the settings menu has the numbers", found_numbers, 2)
 
     -- The switch flips the setting and keeps it.
     local before = Settings:read().enabled
@@ -1565,43 +1559,28 @@ local function tests_sample()
     expect("and flips it back", Settings:read().enabled, before)
 
     -- A number goes up and down by one.
-    local band_item = nil
+    local margin_item = nil
     for _i, item in ipairs(menu) do
         if item.sub_item_table then
             local label = item.text_func()
-            if label:find("Longest line") then band_item = item end
+            if label:find("Biggest margin") then margin_item = item end
         end
     end
-    expect("the longest line is in the menu", band_item ~= nil, true)
-    local value = Settings:read().band_max
-    band_item.sub_item_table[2].callback()
-    expect("a number goes up by one", Settings:read().band_max, value + 1)
-    band_item.sub_item_table[1].callback()
-    expect("and back down", Settings:read().band_max, value)
+    expect("the biggest margin is in the menu", margin_item ~= nil, true)
+    local value = Settings:read().margin_max
+    margin_item.sub_item_table[2].callback()
+    expect("a number goes up by one", Settings:read().margin_max, value + 1)
+    margin_item.sub_item_table[1].callback()
+    expect("and back down", Settings:read().margin_max, value)
 
-    -- The two ends of a pair never cross: the shortest line cannot go past the longest one, and the
-    -- smallest margin cannot go past the biggest one.
+    -- The two ends of a pair never cross: the smallest margin cannot go past the biggest one.
     -- The menu reads the settings when it is built, so it is built again for each case.
     local function menuItem(label)
         for _i, item in ipairs(auto_plugin:settingsMenu()) do
             if item.sub_item_table and item.text_func():find(label) then return item end
         end
     end
-    -- The longest line is pushed down to the shortest one: it cannot go below it.
-    Settings:write({ band_min = 70, band_max = 70 })
-    local longest = menuItem("Longest line")
-    expect("the longest line is in the menu", longest ~= nil, true)
-    longest.sub_item_table[1].callback()
-    expect("the longest line does not go below the shortest one", Settings:read().band_max, 70)
-    expect("and the step that would do it is not offered", longest.sub_item_table[1].enabled_func(), false)
-    -- The shortest line is pushed up to the longest one: it cannot go above it.
-    Settings:write({ band_min = 40, band_max = 40 })
-    local shortest = menuItem("Shortest line")
-    expect("the shortest line is in the menu", shortest ~= nil, true)
-    shortest.sub_item_table[2].callback()
-    expect("the shortest line does not go above the longest one", Settings:read().band_min, 40)
-    expect("and the step that would do it is not offered", shortest.sub_item_table[2].enabled_func(), false)
-    -- The same for the margins.
+    -- The margins.
     Settings:write({ margin_min = 50, margin_max = 50 })
     local biggest = menuItem("Biggest margin")
     expect("the biggest margin is in the menu", biggest ~= nil, true)
@@ -1614,12 +1593,6 @@ local function tests_sample()
     smallest.sub_item_table[2].callback()
     expect("the smallest margin does not go above the biggest one", Settings:read().margin_min, 20)
     expect("and the step that would do it is not offered", smallest.sub_item_table[2].enabled_func(), false)
-    -- Equal ends are a fixed pair: neither end moves past the other.
-    Settings:write({ band_min = 60, band_max = 60 })
-    local equal_shortest = menuItem("Shortest line")
-    local equal_longest = menuItem("Longest line")
-    expect("equal ends: the shortest line does not move up", equal_shortest.sub_item_table[2].enabled_func(), false)
-    expect("equal ends: the longest line does not move down", equal_longest.sub_item_table[1].enabled_func(), false)
     -- The settings are put back as they were.
     Settings:write(settings)
 end

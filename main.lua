@@ -228,14 +228,6 @@ function LineLength:measureSettled()
     return report, reason
 end
 
--- Pages sampled when the caller does not say: 6 from the start, 6 from the middle, 6 from the end.
-local function sampleCounts(counts)
-    counts = counts or {}
-    return counts.first or Sample.DEFAULT_FIRST,
-        counts.middle or Sample.DEFAULT_MIDDLE,
-        counts.last or Sample.DEFAULT_LAST
-end
-
 -- The longest line of each page of a sample of the book, measured off screen.
 -- The pages are reached with a page turn and drawn into a buffer nobody sees (see newDrawer), then the
 -- reader is put back where it was. Nothing is refreshed: KOReader marks the view as not drawn when the
@@ -250,7 +242,7 @@ function LineLength:measureSample(counts)
     if not (doc and doc.getPageCount and ui.handleEvent) then
         return nil, "unsupported"
     end
-        -- Only a book that reflows has lines of text to measure; a PDF or a comic has pages, not lines,
+    -- Only a book that reflows has lines of text to measure; a PDF or a comic has pages, not lines,
     -- and walking them would be a scan of nothing.
     if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer) then
         return nil, "unsupported"
@@ -259,8 +251,8 @@ function LineLength:measureSample(counts)
     if not ok or type(total) ~= "number" or total < 1 then
         return nil, "empty"
     end
-    local first, middle, last = sampleCounts(counts)
-    local pages = Sample.pages(total, first, middle, last)
+    local pages = Sample.pages(total, counts and counts.first, counts and counts.middle,
+        counts and counts.last)
     if #pages == 0 then
         return nil, "empty"
     end
@@ -524,23 +516,18 @@ function LineLength:onControl(card, session, id)
 end
 
 -- The auto-tune: measures the line length of a sample of the book and, when it is outside the band the
--- reader asked for, moves the margins until it is inside. The size of the text is the reader's own and
--- is never touched. Every step is measured again, so the loop stops on what the book really holds and
--- not on what the formula predicts.
+-- tune aims at, moves the margins until it is inside. The size of the text is the reader's own and is
+-- never touched. Every step is measured again, so the loop stops on what the book really holds and not
+-- on what the formula predicts.
 function LineLength:autoTune(settings)
     settings = settings or {}
-    -- The band, the target and the bounds of the margins, as the reader set them. The loop stops on
-    -- the band and the step aims at the target, so both helpers have to be given the same one.
+    -- The band, the target and the bounds of the margins, as the tune has them: the reader sets the
+    -- margins, the band and the target are the auto-tune's own. The loop stops on the band and the step
+    -- aims at the target, so both helpers have to be given the same one.
     local limits = AutoTune.limits(settings)
-    local counts = {
-        first = settings.sample_first,
-        middle = settings.sample_middle,
-        last = settings.sample_last,
-    }
-    local max_steps = limits.max_steps
     local width = screenWidthUnits()
 
-    local sample, reason = self:measureSample(counts)
+    local sample, reason = self:measureSample()
     if not sample then
         logger.warn("linelength: could not measure the book for the auto-tune:", reason)
         return nil
@@ -568,7 +555,7 @@ function LineLength:autoTune(settings)
         margin = next_margin
         changed = true
         steps = steps + 1
-        local again = self:measureSample(counts)
+        local again = self:measureSample()
         if not again then
             return nil
         end
@@ -579,7 +566,7 @@ function LineLength:autoTune(settings)
     if not inside and not moveTo(margin) then
         return { steps = steps, chars = nil, changed = changed, margin = margin }
     end
-    while not AutoTune.inBand(chars, limits) and steps < max_steps do
+    while not AutoTune.inBand(chars, limits) and steps < AutoTune.MAX_STEPS do
         local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
         if not next_margin then
             break -- nothing more can be tried: the book is as good as it can get
@@ -823,16 +810,8 @@ function LineLength:settingsMenu()
                 save()
             end,
         },
-        number(_("Shortest line"), "band_min", 1, 30, 80, "band_max", true),
-        number(_("Longest line"), "band_max", 1, 30, 80, "band_min", false),
-        number(_("Target line length"), "target", 1, 30, 100),
         number(_("Smallest margin"), "margin_min", 1, 0, 140, "margin_max", true),
         number(_("Biggest margin"), "margin_max", 1, 0, 140, "margin_min", false),
-        number(_("Characters per step"), "max_chars_per_step", 1, 1, 30),
-        number(_("Pages at the start"), "sample_first", 1, 0, 20),
-        number(_("Pages in the middle"), "sample_middle", 1, 1, 20),
-        number(_("Pages at the end"), "sample_last", 1, 0, 20),
-        number(_("Steps at most"), "max_steps", 1, 1, 20),
     }
 end
 

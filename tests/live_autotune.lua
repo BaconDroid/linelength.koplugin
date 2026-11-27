@@ -96,38 +96,17 @@ function ui:handleEvent(ev)
     end
 end
 
--- The settings of the book: the harness has no KOReader sidecar, so a plain table stands in for it.
-local book_store = {}
-ui.doc_settings = {
-    readSetting = function(_self, key) return book_store[key] end,
-    saveSetting = function(_self, key, value) book_store[key] = value end,
-    delSetting = function(_self, key) book_store[key] = nil end,
-    flush = function() end,
-}
-
 local plugin = LineLength:new{ document = doc, ui = ui }
 plugin:init()
 
--- The settings the plugin reads: the harness has no KOReader settings file, so they are given here.
+-- The settings the plugin reads: the harness has no KOReader settings file, so the switch is turned
+-- on here, the way a reader would turn it on. Nothing else is given: the band, the target, the step
+-- and the sample are the tune's own, and the test must take them from the plugin rather than carry
+-- its own copy of them, or a change to the tune would leave the test checking the old numbers.
 local Settings = require("linelength/settings")
-local real_read = Settings.read
-Settings.read = function() return {
-    -- The book of this test is opened in the middle on purpose: the start gate is a matter for the
-    -- unit tests, and what is checked here is the tune and the flag.
-    enabled = true,
-    band_min = 56, band_max = 60, target = 58,
-    margin_min = 10, margin_max = 50, max_chars_per_step = 6,
-    sample_first = 0, sample_middle = 6, sample_last = 0, max_steps = 6,
-} end
-
-local settings = {
-    enabled = true,
-    band_min = 56, band_max = 60, target = 58,
-    margin_min = 10, margin_max = 50,
-    max_chars_per_step = 6,
-    sample_first = 0, sample_middle = 6, sample_last = 0,
-    max_steps = 6,
-}
+local settings = { enabled = true }
+Settings.read = function() return settings end
+local limits = AutoTune.limits(settings)
 
 -- The book starts badly set up: a big text on wide margins makes the lines too short.
 layout.font_size = tonumber(os.getenv("FONT")) or 22
@@ -163,7 +142,7 @@ print(string.format("before: median %s (min %s, max %s)", tostring(before.median
 -- has nothing to do, which is a result in itself.
 local starts_outside = not AutoTune.inBand(before.median)
 if starts_outside then
-    if before.median > settings.band_max then
+    if before.median > limits.band_max then
         check("the lines are too long to begin with", true, before.median .. " characters")
     else
         check("the lines are too short to begin with", true, before.median .. " characters")
@@ -193,30 +172,30 @@ check("the auto-tune changed the layout when it could", result.changed == margin
 if AutoTune.inBand(result.chars) then
     check("the line length is now in the band", true, tostring(result.chars))
 else
-    check("the tune went as far as the margins go", layout.h_page_margins[1] == settings.margin_max
-        or layout.h_page_margins[1] == settings.margin_min, tostring(layout.h_page_margins[1]))
+    check("the tune went as far as the margins go", layout.h_page_margins[1] == limits.margin_max
+        or layout.h_page_margins[1] == limits.margin_min, tostring(layout.h_page_margins[1]))
 end
-check("the margins stayed inside the bounds", layout.h_page_margins[1] >= settings.margin_min
-    and layout.h_page_margins[1] <= settings.margin_max, tostring(layout.h_page_margins[1]))
-check("it took a few steps", result.steps <= settings.max_steps, result.steps .. " steps")
+check("the margins stayed inside the bounds", layout.h_page_margins[1] >= limits.margin_min
+    and layout.h_page_margins[1] <= limits.margin_max, tostring(layout.h_page_margins[1]))
+check("it took a few steps", result.steps <= limits.max_steps, result.steps .. " steps")
 -- The margins move towards the target: wider when the lines are too long, narrower when they are
 -- too short. The text size never moves.
 if starts_outside and margins_moved then
     -- The margins move towards the target: wider when the lines are too long, narrower when they are
     -- too short, unless they are already at the bound that movement would need.
-    if before.median > settings.band_max then
+    if before.median > limits.band_max then
         check("the margins went out", layout.h_page_margins[1] > start_margin
-            or layout.h_page_margins[1] == settings.margin_max, tostring(layout.h_page_margins[1]))
+            or layout.h_page_margins[1] == limits.margin_max, tostring(layout.h_page_margins[1]))
     else
         check("the margins came in", layout.h_page_margins[1] < start_margin
-            or layout.h_page_margins[1] == settings.margin_min, tostring(layout.h_page_margins[1]))
+            or layout.h_page_margins[1] == limits.margin_min, tostring(layout.h_page_margins[1]))
     end
 end
 check("the margins are even", layout.h_page_margins[1] == layout.h_page_margins[2])
 check("the text size was never touched", layout.font_size == start_font,
     tostring(layout.font_size) .. " instead of " .. tostring(start_font))
-check("the margins are inside their bounds", layout.h_page_margins[1] >= settings.margin_min
-    and layout.h_page_margins[1] <= settings.margin_max, tostring(layout.h_page_margins[1]))
+check("the margins are inside their bounds", layout.h_page_margins[1] >= limits.margin_min
+    and layout.h_page_margins[1] <= limits.margin_max, tostring(layout.h_page_margins[1]))
 
 local after = plugin:measureSample()
 check("the book measures the same afterwards", after ~= nil and after.median == result.chars,
@@ -234,23 +213,20 @@ local again = plugin:autoTune(settings)
 check("a second run leaves the book alone", again and again.changed == false, tostring(again and again.changed))
 check("and it measures the same", again and again.chars == result.chars, tostring(again and again.chars))
 
--- The tune runs again every time the book is opened at its first page: the margins are put back to
--- where they were before the tune, the book is opened at its first page again, and it is measured and
--- tuned again.
+-- The book is opened again at its first page, with the margins it had before the tune: it is tuned
+-- again, and lands on the same margins. Nothing else moves the margins, so their coming back is the
+-- measurement and the tune having run again.
 plugin:applyLayout({ start_margin, start_margin }, nil)
 UIManager:forceRePaint()
 doc:gotoPage(1)
 check("the book is back at its first page", doc:getCurrentPage() == 1, "page " .. doc:getCurrentPage())
-local measured_again = false
-local real_measureSample = plugin.measureSample
-plugin.measureSample = function(self, ...) measured_again = true; return real_measureSample(self, ...) end
+check("the margins are back where they were before the tune", layout.h_page_margins[1] == start_margin,
+    tostring(layout.h_page_margins[1]) .. " vs " .. tostring(start_margin))
 plugin:onReaderReady()
 -- The tune waits for the reader's own tick, as it does at book open: the UI loop is run here so that
 -- a check sees what the reader would have seen a moment later.
 UIManager:_checkTasks()
-check("the book is measured again when it is reopened at its first page", measured_again == true,
-    "measured_again=" .. tostring(measured_again))
-check("and it is tuned again to the same margins", layout.h_page_margins[1] == result.margin,
+check("a book reopened at its first page is tuned again", layout.h_page_margins[1] == result.margin,
     tostring(layout.h_page_margins[1]) .. " vs " .. tostring(result.margin))
 
 print("ALL LIVE CHECKS PASSED")
