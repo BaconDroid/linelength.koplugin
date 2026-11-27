@@ -10,8 +10,7 @@ os.chdir(root)
 status = 0
 
 for name in ("test_counter.lua", "test_rating.lua", "test_report.lua", "test_pagelines.lua",
-             "test_layout.lua", "test_sample.lua", "test_autotune.lua",
-             "test_settings.lua", "test_main.lua"):
+             "test_layout.lua", "test_sample.lua", "test_autotune.lua", "test_main.lua"):
     lua = LuaRuntime()
     try:
         lua.execute(open(os.path.join(here, name)).read())

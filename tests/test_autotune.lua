@@ -34,72 +34,47 @@ expect("out of band: 61", AutoTune.inBand(61), false)
 expect("out of band: nothing", AutoTune.inBand(nil), false)
 expect("out of band: text", AutoTune.inBand("x"), false)
 
--- The limits of the tune come from the table given to it, and the helpers use them: a band the
--- caller sets is the band the loop stops on, not the default one.
-local limits = AutoTune.limits({ band_min = 65, band_max = 70, target = 68, margin_min = 10, margin_max = 90 })
-expect("the band from the settings", limits.band_min, 65)
-expect("the band from the settings", limits.band_max, 70)
-expect("the target from the settings", limits.target, 68)
-expect("the margins from the settings", limits.margin_min, 10)
-expect("the margins from the settings", limits.margin_max, 90)
-expect("in the band given", AutoTune.inBand(68, limits), true)
-expect("out of the band given", AutoTune.inBand(61, limits), false)
-expect("out of the band given", AutoTune.inBand(71, limits), false)
-expect("the defaults without settings", AutoTune.limits().band_min, AutoTune.BAND_MIN)
-expect("the defaults without settings", AutoTune.limits().margin_max, AutoTune.MARGIN_MAX)
+-- The limits are the tune's own, and the only two a reader sets are the margins: a margin outside
+-- the range the menu offers is brought back to its edge, because the settings file is a plain table a
+-- reader can edit by hand.
+local limits = AutoTune.limits()
+expect("the band is the tune's own", limits.band_min, AutoTune.BAND_MIN)
+expect("the band is the tune's own", limits.band_max, AutoTune.BAND_MAX)
+expect("the target is the tune's own", limits.target, AutoTune.TARGET)
+expect("the step is the tune's own", limits.max_chars_per_step, AutoTune.MAX_CHARS_PER_STEP)
+expect("the steps are the tune's own", limits.max_steps, AutoTune.MAX_STEPS)
+expect("the margins default to their bounds", limits.margin_min, AutoTune.MARGIN_MIN)
+expect("the margins default to their bounds", limits.margin_max, AutoTune.MARGIN_MAX)
 
--- The reader can leave a pair the wrong way round in the settings file: the shortest line cannot be
--- longer than the longest one, and the smallest margin cannot be bigger than the biggest one, so
--- the pair is put the right way round.
-local swapped = AutoTune.limits({ band_min = 80, band_max = 30, margin_min = 140, margin_max = 0 })
-expect("the band is put the right way round", swapped.band_min, 30)
-expect("the band is put the right way round", swapped.band_max, 80)
+local set_margins = AutoTune.limits({ margin_min = 20, margin_max = 40 })
+expect("the smallest margin is a setting", set_margins.margin_min, 20)
+expect("the biggest margin is a setting", set_margins.margin_max, 40)
+
+-- The reader can leave a pair the wrong way round in the settings file: the smallest margin cannot
+-- be bigger than the biggest one, so the pair is put the right way round.
+local swapped = AutoTune.limits({ margin_min = 140, margin_max = 0 })
 expect("the margins are put the right way round", swapped.margin_min, 0)
 expect("the margins are put the right way round", swapped.margin_max, 140)
-expect("equal ends are left alone", AutoTune.limits({ band_min = 60, band_max = 60 }).band_min, 60)
 
--- The settings file is a plain table, so a reader can leave anything in it: a value out of range is
--- brought back to the edge of its range, and a value that is not a number falls back to the default.
--- A margin below nothing and a step of nothing or less are the two that would break the loop.
-local wild = AutoTune.limits({
-    band_min = -10, band_max = -5, margin_min = -3, margin_max = -1, target = 999, max_chars_per_step = -2,
-})
-expect("a negative band comes back into range", wild.band_min, AutoTune.BAND_FLOOR)
-expect("a negative band comes back into range", wild.band_max, AutoTune.BAND_FLOOR)
+-- The settings file is a plain table, so a reader can leave anything in it: a margin out of range is
+-- brought back to the edge of its range, and one that is not a number falls back to the default.
+local wild = AutoTune.limits({ margin_min = -3, margin_max = -1 })
 expect("a negative margin comes back to nothing", wild.margin_min, AutoTune.MARGIN_FLOOR)
 expect("a negative margin comes back to nothing", wild.margin_max, AutoTune.MARGIN_FLOOR)
-expect("a huge target comes back into the band", wild.target, AutoTune.BAND_FLOOR)
-expect("a step of less than one becomes one", wild.max_chars_per_step, AutoTune.STEP_FLOOR)
 expect("a wild setting still gives a margin inside the bounds",
-    AutoTune.nextMargin(30, 70, WIDTH, wild) >= AutoTune.MARGIN_FLOOR, true)
+    AutoTune.nextMargin(30, 70, WIDTH) >= AutoTune.MARGIN_FLOOR, true)
 
-local text = AutoTune.limits({ band_min = "x", margin_max = "y", max_chars_per_step = "z" })
-expect("a setting that is not a number falls back", text.band_min, AutoTune.BAND_MIN)
+local text = AutoTune.limits({ margin_min = "x", margin_max = "y" })
+expect("a setting that is not a number falls back", text.margin_min, AutoTune.MARGIN_MIN)
 expect("a setting that is not a number falls back", text.margin_max, AutoTune.MARGIN_MAX)
-expect("a setting that is not a number falls back", text.max_chars_per_step, AutoTune.MAX_CHARS_PER_STEP)
 
--- The steps are held to the range the menu offers: a hand-edited file cannot make the loop run a
--- thousand times, and the default is the one the menu's stepper starts from.
-expect("the steps at most default", AutoTune.MAX_STEPS, 6)
-expect("the steps at most ceiling is the menu's upper bound", AutoTune.STEPS_CEILING, 20)
-expect("the steps from the settings", AutoTune.limits({ max_steps = 1000 }).max_steps, AutoTune.STEPS_CEILING)
-expect("a step count below one becomes one", AutoTune.limits({ max_steps = 0 }).max_steps, AutoTune.STEPS_FLOOR)
-expect("a step count that is not a number falls back", AutoTune.limits({ max_steps = "x" }).max_steps, AutoTune.MAX_STEPS)
-expect("the steps without settings", AutoTune.limits().max_steps, AutoTune.MAX_STEPS)
-
--- The target is the length the loop aims at, and the band is what it stops on: a target outside the
--- band is brought to the edge, so it cannot pull the loop past the band.
-local off_target = AutoTune.limits({ band_min = 56, band_max = 60, target = 90 })
-expect("a target above the band comes to its edge", off_target.target, 60)
-local under_target = AutoTune.limits({ band_min = 56, band_max = 60, target = 20 })
-expect("a target below the band comes to its edge", under_target.target, 56)
-
--- The step aims at the band given to it, not at the default one: with a band of 65 to 70
--- and a target of 68, the lines are made longer towards 68, and the margins come in. With the
--- default band of 56 to 60 the same lines would go the other way, towards 58.
-local aimed_band = AutoTune.nextMargin(30, 72, WIDTH, limits)
-expect("the step aims at the band of the reader", aimed_band > 30, true)
-expect("the step aims at the band of the reader, not at the default one",
+-- The step aims at the target of the band it is given: with a band of 65 to 70 and a target of 68,
+-- the same lines are made longer towards 68 and the margins come in, where the default band of 56 to
+-- 60 sends them the other way, towards 58.
+local narrow_band = { band_min = 65, band_max = 70, target = 68 }
+local aimed_band = AutoTune.nextMargin(30, 72, WIDTH, narrow_band)
+expect("the step aims at the band it is given", aimed_band > 30, true)
+expect("the step aims at the band it is given, not at the default one",
     aimed_band < AutoTune.nextMargin(30, 72, WIDTH), true)
 
 local wider = AutoTune.nextMargin(10, 80, WIDTH)

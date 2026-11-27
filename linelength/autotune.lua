@@ -11,31 +11,23 @@
 -- small screen as on a large one.
 local AutoTune = {}
 
+-- The margins the tune may use, and the range they are held to: the settings file is a plain Lua
+-- table a reader can edit by hand, so a margin outside this range is brought back to its edge
+-- rather than obeyed.
+AutoTune.MARGIN_MIN = 10
+AutoTune.MARGIN_MAX = 50
+AutoTune.MARGIN_FLOOR = 0
+AutoTune.MARGIN_CEILING = 200
+
+-- How many characters the line length may change in one step.
+AutoTune.MAX_CHARS_PER_STEP = 6
+
 -- Where the line length should land: a band of good lengths, and the one to aim at inside it.
 AutoTune.BAND_MIN = 56
 AutoTune.BAND_MAX = 60
 AutoTune.TARGET = 58
 
--- The margins the tune may use.
-AutoTune.MARGIN_MIN = 10
-AutoTune.MARGIN_MAX = 50
-
--- How many characters the line length may change in one step.
-AutoTune.MAX_CHARS_PER_STEP = 6
-
--- The range the settings are held to, as the menu offers them: a value outside is brought back to the
--- edge of its range rather than obeyed. A band of nothing and a margin of nothing are not a line and
--- not a margin, so the band has a floor of its own and the margins have theirs.
-AutoTune.BAND_FLOOR = 10
-AutoTune.BAND_CEILING = 200
-AutoTune.MARGIN_FLOOR = 0
-AutoTune.MARGIN_CEILING = 200
-AutoTune.STEP_FLOOR = 1
-AutoTune.STEP_CEILING = 30
--- How many re-renders the tune may take, held to the range the menu's stepper offers so that a
--- hand-edited settings file cannot make the loop run a thousand times.
-AutoTune.STEPS_FLOOR = 1
-AutoTune.STEPS_CEILING = 20
+-- How many re-renders the tune may take.
 AutoTune.MAX_STEPS = 6
 
 -- A number from the settings, kept inside the range the menu offers: the settings file is a plain
@@ -62,32 +54,19 @@ local function resolved(limits)
     }
 end
 
---- The limits of the tune, from the settings the reader chose: the band of line lengths, the target
---- inside it, the bounds of the margins and the size of a step, checked against each other so that
---- the loop always has something to aim for.
---- @param settings table|nil the settings, as in linelength/settings.lua
+--- The limits of the tune: its own band, target and step, and the two margins the reader chose, held
+--- to the range the menu offers so that the loop always has something to aim for.
+--- @param settings table|nil the two margins the reader chose, as LineLength:settings returns them
 --- @return table { band_min, band_max, target, margin_min, margin_max, max_chars_per_step, max_steps }
 function AutoTune.limits(settings)
     settings = settings or {}
     local limits = resolved({
-        band_min = within(settings.band_min, nil, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING),
-        band_max = within(settings.band_max, nil, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING),
         margin_min = within(settings.margin_min, nil, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING),
         margin_max = within(settings.margin_max, nil, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING),
-        target = within(settings.target, nil, AutoTune.BAND_FLOOR, AutoTune.BAND_CEILING),
-        max_chars_per_step = within(settings.max_chars_per_step, nil, AutoTune.STEP_FLOOR, AutoTune.STEP_CEILING),
-        max_steps = within(settings.max_steps, nil, AutoTune.STEPS_FLOOR, AutoTune.STEPS_CEILING),
     })
-    -- The reader can leave a pair the wrong way round in the settings file: the shortest line cannot be
-    -- longer than the longest one, so the pair is put the right way round here.
-    if limits.band_min > limits.band_max then
-        limits.band_min, limits.band_max = limits.band_max, limits.band_min
-    end
     if limits.margin_min > limits.margin_max then
         limits.margin_min, limits.margin_max = limits.margin_max, limits.margin_min
     end
-    -- The target is the length the loop aims at, and the band is what it stops on: a target outside the
-    -- band is brought to the edge rather than left to pull the loop past it.
     limits.target = math.max(limits.band_min, math.min(limits.band_max, limits.target))
     return limits
 end
