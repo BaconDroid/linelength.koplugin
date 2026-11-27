@@ -1522,40 +1522,6 @@ local function tests_sample()
     expect("a book opened anywhere else is left alone", gate_called, false)
     Settings.read = real_read
 
-    Settings.read = real_read
-
-    -- A book that could not be measured is not remembered as tuned: a temporary failure would
-    -- otherwise keep the book from being tuned the next time it is opened.
-    local BookState = require("linelength/bookstate")
-    local marked = 0
-    local real_mark = BookState.markTuned
-    local real_was = BookState.wasTuned
-    BookState.markTuned = function() marked = marked + 1; return true end
-    BookState.wasTuned = function() return false end
-    Settings.read = function(self) return { enabled = true } end
-    auto_plugin.autoTune = function() return nil end
-    auto_plugin:onReaderReady()
-    expect("a book that could not be measured is not marked as tuned", marked, 0)
-    -- A book that was measured is marked, even when its margins did not have to move.
-    auto_plugin.autoTune = function() return { steps = 0, chars = 58, changed = false, margin = 30 } end
-    auto_plugin:onReaderReady()
-    expect("a book that was measured is marked as tuned", marked, 1)
-
-    -- The flag is what makes the tune run once for a book: it is saved with the book, and a book that
-    -- carries it is not measured again when it is opened.
-    local seen = 0
-    auto_plugin.autoTune = function() seen = seen + 1; return { steps = 1, chars = 58, changed = true, margin = 30 } end
-    Settings.read = function(self) return { enabled = true } end
-    BookState.wasTuned = function() return false end
-    auto_plugin:onReaderReady()
-    expect("a book without the flag is tuned", seen, 1)
-    BookState.wasTuned = function() return true end
-    auto_plugin:onReaderReady()
-    expect("a book with the flag is not tuned again", seen, 1)
-    BookState.wasTuned = real_was
-    BookState.markTuned = real_mark
-    Settings.read = real_read
-
     -- The action that tunes the book now says what came of it, and says so when it could not be done.
     local tune_plugin = LineLength:new{ document = {}, ui = { menu = newMenu(), highlight = newHighlight() } }
     tune_plugin:init()

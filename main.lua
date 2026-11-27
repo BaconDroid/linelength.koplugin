@@ -24,7 +24,6 @@ local Report = require("linelength/report")
 local Sample = require("linelength/sample")
 local AutoTune = require("linelength/autotune")
 local Settings = require("linelength/settings")
-local BookState = require("linelength/bookstate")
 
 local LineLength = WidgetContainer:extend{
     name = "linelength",
@@ -592,16 +591,12 @@ function LineLength:autoTune(settings)
     return { steps = steps, chars = chars, changed = changed, margin = margin }
 end
 
--- The auto-tune when a book opens, if the reader asked for it. It runs once for a book: the flag that
--- says it did lives in the settings of the book, so a book opened again keeps its margins.
--- It is quiet: a book that is already within the band is left alone, and nothing is shown when there
--- was nothing to do.
+-- The auto-tune when a book opens, if the reader asked for it. It runs every time a book is opened at
+-- its first page: a book that is already within the band keeps the margins it has, and nothing is
+-- shown when there was nothing to do.
 function LineLength:onReaderReady()
     local ok, settings = pcall(function() return Settings:read() end)
     if not ok or not settings.enabled then
-        return
-    end
-    if BookState.wasTuned(self.ui) then
         return
     end
     -- Only when the book is opened at its start: a book picked up where it was left keeps its layout.
@@ -619,13 +614,10 @@ function LineLength:onReaderReady()
             logger.warn("linelength: the auto-tune failed:", result)
             return
         end
-        -- Only a book that was really measured is remembered as tuned: a measurement that failed leaves
-        -- the book to be measured again the next time it is opened.
+        -- A book that could not be measured has no count: the tune gives up on it and the book keeps
+        -- the layout it has.
         if not result or result.chars == nil then
             return
-        end
-        if not BookState.markTuned(self.ui) then
-            logger.warn("linelength: could not remember this book as tuned")
         end
         if result.changed then
             logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
@@ -710,8 +702,8 @@ function LineLength:onLinelengthSample()
     return true
 end
 
--- Tunes the book now, and says what came of it. The book is measured again even when it was already
--- tuned: this is the action the reader reaches for when a book does not look right.
+-- Tunes the book now, and says what came of it. The book is measured again even when it is already
+-- within the band: this is the action the reader reaches for when a book does not look right.
 function LineLength:tuneNow()
     local ok, settings = pcall(function() return Settings:read() end)
     if not ok then
@@ -725,15 +717,12 @@ function LineLength:tuneNow()
             UIManager:show(InfoMessage:new{ text = _("Could not tune this book.") })
             return
         end
-        -- A book that could not be measured has no count to show, and is not remembered as tuned:
-        -- the message about nothing to change is for a book that was measured and is already there.
+        -- A book that could not be measured has no count to show: the message about nothing to change
+        -- is for a book that was measured and is already there.
         if not result or result.chars == nil then
             logger.warn("linelength: the auto-tune could not measure the book")
             UIManager:show(InfoMessage:new{ text = _("Could not tune this book.") })
             return
-        end
-        if not BookState.markTuned(self.ui) then
-            logger.warn("linelength: could not remember this book as tuned")
         end
         if result.changed then
             UIManager:show(InfoMessage:new{

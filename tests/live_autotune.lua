@@ -234,24 +234,24 @@ local again = plugin:autoTune(settings)
 check("a second run leaves the book alone", again and again.changed == false, tostring(again and again.changed))
 check("and it measures the same", again and again.chars == result.chars, tostring(again and again.chars))
 
--- The flag: a book that was already tuned is not measured again when it is opened.
-local BookState = require("linelength/bookstate")
-BookState.markTuned(ui)
-check("the book is remembered as tuned", BookState.wasTuned(ui) == true, "the flag is in the settings of the book")
+-- The tune runs again every time the book is opened at its first page: the margins are put back to
+-- where they were before the tune, the book is opened at its first page again, and it is measured and
+-- tuned again.
+plugin:applyLayout({ start_margin, start_margin }, nil)
+UIManager:forceRePaint()
+doc:gotoPage(1)
+check("the book is back at its first page", doc:getCurrentPage() == 1, "page " .. doc:getCurrentPage())
 local measured_again = false
-plugin.measureSample = function() measured_again = true; return nil, "unsupported" end
+local real_measureSample = plugin.measureSample
+plugin.measureSample = function(self, ...) measured_again = true; return real_measureSample(self, ...) end
 plugin:onReaderReady()
 -- The tune waits for the reader's own tick, as it does at book open: the UI loop is run here so that
 -- a check sees what the reader would have seen a moment later.
 UIManager:_checkTasks()
-check("a tuned book is not measured again", measured_again == false, "measured_again=" .. tostring(measured_again))
-
--- With the flag off, it is measured again.
-BookState.clearTuned(ui)
-measured_again = false
-plugin:onReaderReady()
-UIManager:_checkTasks()
-check("a book that was not tuned is measured again", measured_again == true, "measured_again=" .. tostring(measured_again))
+check("the book is measured again when it is reopened at its first page", measured_again == true,
+    "measured_again=" .. tostring(measured_again))
+check("and it is tuned again to the same margins", layout.h_page_margins[1] == result.margin,
+    tostring(layout.h_page_margins[1]) .. " vs " .. tostring(result.margin))
 
 print("ALL LIVE CHECKS PASSED")
 os.exit(0)

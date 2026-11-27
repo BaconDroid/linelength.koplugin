@@ -85,7 +85,8 @@ of a line is made of. The top and bottom margins are left alone too: they change
 on a page, not how many characters a line holds.
 
 The margins are saved with the book, the way KOReader saves the margins a reader sets by hand, and
-the book is tuned once: the next time it is opened, it keeps them.
+the book is tuned every time it is opened at its first page. A book that is already within the band
+keeps the margins it has.
 
 ## What the ranges are
 
