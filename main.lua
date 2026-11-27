@@ -563,8 +563,17 @@ function LineLength:autoTune(settings)
         return chars
     end
 
-    if not inside and not moveTo(margin) then
+    local function putBackAndFail()
+        if changed then
+            self:applyLayout({ left, right }, nil)
+            margin = (left + right) / 2
+            changed = false
+        end
         return { steps = steps, chars = nil, changed = changed, margin = margin }
+    end
+
+    if not inside and not moveTo(margin) then
+        return putBackAndFail()
     end
     while not AutoTune.inBand(chars, limits) and steps < AutoTune.MAX_STEPS do
         local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
@@ -572,7 +581,7 @@ function LineLength:autoTune(settings)
             break -- nothing more can be tried: the book is as good as it can get
         end
         if not moveTo(next_margin) then
-            return { steps = steps, chars = nil, changed = changed, margin = margin }
+            return putBackAndFail()
         end
     end
     return { steps = steps, chars = chars, changed = changed, margin = margin }
@@ -586,16 +595,18 @@ function LineLength:onReaderReady()
     if not ok or not settings.enabled then
         return
     end
-    -- Only when the book is opened at its start: a book picked up where it was left keeps its layout.
-    local doc = self.ui and self.ui.document
-    local ok_page, page = pcall(doc and doc.getCurrentPage, doc)
-    if (ok_page and tonumber(page)) ~= 1 then
-        return
-    end
     -- ReaderRolling schedules its partial rerendering a tick after it is ready, not before. Measuring
     -- here would make every margin change a full re-render on the UI thread at book open, so the tune
     -- waits for the reader's own tick; no message is shown, the automatic path is meant to be quiet.
     UIManager:tickAfterNext(function()
+        -- Only when the book is opened at its start: a book picked up where it was left keeps its
+        -- layout. The page is asked for here rather than before the tick, so that it holds where the
+        -- layout would actually move.
+        local doc = self.ui and self.ui.document
+        local ok_page, page = pcall(doc and doc.getCurrentPage, doc)
+        if (ok_page and tonumber(page)) ~= 1 then
+            return
+        end
         local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
         if not ok_tune then
             logger.warn("linelength: the auto-tune failed:", result)

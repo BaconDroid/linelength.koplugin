@@ -135,7 +135,8 @@ local start_page_in_book = doc:getCurrentPage()
 
 local before = plugin:measureSample()
 check("the book is measured before the tune", before ~= nil)
-check("the first sample left the reader where it found it", doc:getCurrentPage(), start_page_in_book)
+check("the first sample left the reader where it found it", doc:getCurrentPage() == start_page_in_book,
+    "page " .. doc:getCurrentPage() .. ", expected " .. start_page_in_book)
 print(string.format("before: median %s (min %s, max %s)", tostring(before.median), tostring(before.min), tostring(before.max)))
 -- The book has to start outside the band for the tune to have anything to do. The margins are set
 -- wide or narrow to get there; at some text sizes the band is reached either way, and then the tune
@@ -224,8 +225,11 @@ check("the margins are back where they were before the tune", layout.h_page_marg
     tostring(layout.h_page_margins[1]) .. " vs " .. tostring(start_margin))
 plugin:onReaderReady()
 -- The tune waits for the reader's own tick, as it does at book open: the UI loop is run here so that
--- a check sees what the reader would have seen a moment later.
-UIManager:_checkTasks()
+-- a check sees what the reader would have seen a moment later. tickAfterNext puts its action two
+-- ticks out, and a tick only runs what is already due, so the loop runs until nothing is left due.
+for _ = 1, 5 do
+    UIManager:_checkTasks()
+end
 check("a book reopened at its first page is tuned again", layout.h_page_margins[1] == result.margin,
     tostring(layout.h_page_margins[1]) .. " vs " .. tostring(result.margin))
 

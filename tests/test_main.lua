@@ -1201,9 +1201,9 @@ local function tests_autotune()
     expect("and they stay inside the bounds", applied[1][1] >= 20 and applied[1][1] <= 50, true)
     expect("the book is reported as tuned", result and result.chars ~= nil, true)
 
-    -- The book cannot be measured again after the margins moved: no count is reported, because the
-    -- count of the old layout says nothing about the new one.
-    result = tuneBook({
+    -- The book cannot be measured again after the margins moved: no count is reported, and the
+    -- margins go back to where they were, so a failed tune leaves the book as the reader had it.
+    result, applied = tuneBook({
         margins = { 40, 40 },
         measure = function(measure_count)
             if measure_count == 0 then return 75 end -- too long: the loop moves the margins
@@ -1211,7 +1211,9 @@ local function tests_autotune()
         end,
     })
     expect("a book that cannot be measured again has no count", result and result.chars, nil)
-    expect("but the change is still reported", result and result.changed, true)
+    expect("and nothing is reported as changed", result and result.changed, false)
+    expect("the margins are put back where they were", applied[#applied] and applied[#applied][1], 40)
+    expect("and back on both sides", applied[#applied] and applied[#applied][2], 40)
 
     -- The book can be measured but the band is out of reach: the lines stay too long at every margin,
     -- so the margins go as far as they can and stop at the bound, and the count that is left is the
@@ -1535,7 +1537,7 @@ local function tests_sample()
 
     -- The settings menu: a switch and the numbers, each with a step of one.
     local menu = auto_plugin:settingsMenu()
-    expect("the settings menu has entries", #menu > 0, true)
+    expect("the settings menu has exactly three entries", #menu, 3)
     local found_switch, found_numbers = false, 0
     for _i, item in ipairs(menu) do
         if item.text_func then
