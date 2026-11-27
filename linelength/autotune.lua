@@ -17,7 +17,7 @@ AutoTune.BAND_MAX = 60
 AutoTune.TARGET = 58
 
 -- The margins the tune may use.
-AutoTune.MARGIN_MIN = 20
+AutoTune.MARGIN_MIN = 10
 AutoTune.MARGIN_MAX = 50
 
 -- How many characters the line length may change in one step.

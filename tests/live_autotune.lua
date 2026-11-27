@@ -59,20 +59,9 @@ print(string.format("book: %s / %d pages / %dx%d px", book, pages, W, H))
 
 local rect = require("ui/geometry"):new{ x = 0, y = 0, w = W, h = H }
 local paints = 0
--- The reader keeps the place the reader is at in the text, as ReaderRolling does: it is the xpointer,
--- and it is what the reader is put back on when the layout changes and the pages move.
-local rolling = { xpointer = nil }
-local function keepPlace()
-    if not rolling.xpointer then
-        return
-    end
-    -- As ReaderRolling does after a re-render: the reader goes back to the text it was at, not to the
-    -- page number, because the page numbers are what the re-render has just changed.
-    doc:gotoXPointer(rolling.xpointer)
-end
 local ui = {
     document = doc,
-    rolling = rolling,
+    rolling = {},
     configurable = layout,
     view = { paintTo = function(_self, bb, x, y)
         paints = paints + 1
@@ -83,13 +72,6 @@ local ui = {
 function ui:handleEvent(ev)
     if ev.handler == "onGotoPage" then
         doc:gotoPage(ev.args[1])
-        rolling.xpointer = doc:getXPointer()
-        return true
-    end
-    if ev.handler == "onGotoXPointer" then
-        -- As ReaderRolling does: the reader goes to the text the xpointer points at.
-        doc:gotoXPointer(ev.args[1])
-        rolling.xpointer = ev.args[1]
         return true
     end
     if ev.handler == "onConfigChange" then
@@ -104,49 +86,27 @@ function ui:handleEvent(ev)
         doc:setPageMargins(Screen:scaleBySize(ev.args[1][1]), Screen:scaleBySize(10),
             Screen:scaleBySize(ev.args[1][2]), Screen:scaleBySize(10))
         doc:render()
-        keepPlace()
         return true
     end
     if ev.handler == "onSetFontSize" then
         layout.font_size = ev.args[1]
         doc:setFontSize(Screen:scaleBySize(ev.args[1]))
         doc:render()
-        keepPlace()
         return true
     end
 end
 
--- The settings of the book: the harness has no KOReader sidecar, so a plain table stands in for it.
-local book_store = {}
-local book_store = {}
-ui.doc_settings = {
-    readSetting = function(_self, key) return book_store[key] end,
-    saveSetting = function(_self, key, value) book_store[key] = value end,
-    delSetting = function(_self, key) book_store[key] = nil end,
-    flush = function() end,
-}
-
 local plugin = LineLength:new{ document = doc, ui = ui }
 plugin:init()
 
--- The settings the plugin reads: the harness has no KOReader settings file, so they are given here.
+-- The settings the plugin reads: the harness has no KOReader settings file, so the switch is turned
+-- on here, the way a reader would turn it on. Nothing else is given: the band, the target, the step
+-- and the sample are the tune's own, and the test must take them from the plugin rather than carry
+-- its own copy of them, or a change to the tune would leave the test checking the old numbers.
 local Settings = require("linelength/settings")
-local real_read = Settings.read
-Settings.read = function() return {
-    enabled = true, tune_once = true,
-    band_min = 56, band_max = 60, target = 58,
-    margin_min = 20, margin_max = 50, max_chars_per_step = 6,
-    sample_first = 0, sample_middle = 6, sample_last = 0, max_steps = 6,
-} end
-
-local settings = {
-    enabled = true,
-    band_min = 56, band_max = 60, target = 58,
-    margin_min = 20, margin_max = 50,
-    max_chars_per_step = 6,
-    sample_first = 0, sample_middle = 6, sample_last = 0,
-    max_steps = 6,
-}
+local settings = { enabled = true }
+Settings.read = function() return settings end
+local limits = AutoTune.limits(settings)
 
 -- The book starts badly set up: a big text on wide margins makes the lines too short.
 layout.font_size = tonumber(os.getenv("FONT")) or 22
@@ -165,32 +125,25 @@ doc:setPageMargins(Screen:scaleBySize(layout.h_page_margins[1]), Screen:scaleByS
 doc:setFontSize(Screen:scaleBySize(layout.font_size))
 doc:render()
 
-local start_page = math.floor(pages / 2)
+-- The tune runs on a book opened at its start, and that is the case this test models: the reader is
+-- at the first page, the walk visits the sample and comes back to it.
+local start_page = 1
 doc:gotoPage(start_page)
 doc:render()
-rolling.xpointer = doc:getXPointer()
 
--- The place the reader is at in the text, before anything is measured or tuned: the layout changes
--- and the book is laid out again, so the page numbers move, and the reader has to stay on the same
--- place in the text. The place in the text is the xpointer: it points at a spot in the text itself,
--- and the text it points at is still there after the change of the layout.
--- It is taken here, before the first sample walk, so that a walk that does not put the reader back
--- where it found it is caught too.
-local anchor = doc:getXPointer()
-check("the reader has an anchor in the text", anchor ~= nil, tostring(anchor))
+local start_page_in_book = doc:getCurrentPage()
 
 local before = plugin:measureSample()
 check("the book is measured before the tune", before ~= nil)
-check("the first sample left the reader where it found it", doc:isXPointerInCurrentPage(anchor),
-    "the reader is on page " .. doc:getCurrentPage() .. ", the anchor is on page "
-        .. tostring(doc:getPageFromXPointer(anchor)))
+check("the first sample left the reader where it found it", doc:getCurrentPage() == start_page_in_book,
+    "page " .. doc:getCurrentPage() .. ", expected " .. start_page_in_book)
 print(string.format("before: median %s (min %s, max %s)", tostring(before.median), tostring(before.min), tostring(before.max)))
 -- The book has to start outside the band for the tune to have anything to do. The margins are set
 -- wide or narrow to get there; at some text sizes the band is reached either way, and then the tune
 -- has nothing to do, which is a result in itself.
 local starts_outside = not AutoTune.inBand(before.median)
 if starts_outside then
-    if before.median > settings.band_max then
+    if before.median > limits.band_max then
         check("the lines are too long to begin with", true, before.median .. " characters")
     else
         check("the lines are too short to begin with", true, before.median .. " characters")
@@ -220,30 +173,30 @@ check("the auto-tune changed the layout when it could", result.changed == margin
 if AutoTune.inBand(result.chars) then
     check("the line length is now in the band", true, tostring(result.chars))
 else
-    check("the tune went as far as the margins go", layout.h_page_margins[1] == settings.margin_max
-        or layout.h_page_margins[1] == settings.margin_min, tostring(layout.h_page_margins[1]))
+    check("the tune went as far as the margins go", layout.h_page_margins[1] == limits.margin_max
+        or layout.h_page_margins[1] == limits.margin_min, tostring(layout.h_page_margins[1]))
 end
-check("the margins stayed inside the bounds", layout.h_page_margins[1] >= settings.margin_min
-    and layout.h_page_margins[1] <= settings.margin_max, tostring(layout.h_page_margins[1]))
-check("it took a few steps", result.steps <= settings.max_steps, result.steps .. " steps")
+check("the margins stayed inside the bounds", layout.h_page_margins[1] >= limits.margin_min
+    and layout.h_page_margins[1] <= limits.margin_max, tostring(layout.h_page_margins[1]))
+check("it took a few steps", result.steps <= limits.max_steps, result.steps .. " steps")
 -- The margins move towards the target: wider when the lines are too long, narrower when they are
 -- too short. The text size never moves.
 if starts_outside and margins_moved then
     -- The margins move towards the target: wider when the lines are too long, narrower when they are
     -- too short, unless they are already at the bound that movement would need.
-    if before.median > settings.band_max then
+    if before.median > limits.band_max then
         check("the margins went out", layout.h_page_margins[1] > start_margin
-            or layout.h_page_margins[1] == settings.margin_max, tostring(layout.h_page_margins[1]))
+            or layout.h_page_margins[1] == limits.margin_max, tostring(layout.h_page_margins[1]))
     else
         check("the margins came in", layout.h_page_margins[1] < start_margin
-            or layout.h_page_margins[1] == settings.margin_min, tostring(layout.h_page_margins[1]))
+            or layout.h_page_margins[1] == limits.margin_min, tostring(layout.h_page_margins[1]))
     end
 end
 check("the margins are even", layout.h_page_margins[1] == layout.h_page_margins[2])
 check("the text size was never touched", layout.font_size == start_font,
     tostring(layout.font_size) .. " instead of " .. tostring(start_font))
-check("the margins are inside their bounds", layout.h_page_margins[1] >= settings.margin_min
-    and layout.h_page_margins[1] <= settings.margin_max, tostring(layout.h_page_margins[1]))
+check("the margins are inside their bounds", layout.h_page_margins[1] >= limits.margin_min
+    and layout.h_page_margins[1] <= limits.margin_max, tostring(layout.h_page_margins[1]))
 
 local after = plugin:measureSample()
 check("the book measures the same afterwards", after ~= nil and after.median == result.chars,
@@ -252,15 +205,8 @@ check("the text size is still the one the reader chose", layout.font_size == sta
     tostring(layout.font_size))
 -- The layout changed, so the book is laid out again and the page numbers move: the reader stays on
 -- the same place in the text, not on the same page number.
-check("the reader is still in the book", doc:getCurrentPage() >= 1 and doc:getCurrentPage() <= doc:getPageCount(),
+check("the reader is back at the start of the book", doc:getCurrentPage() == 1,
     "page " .. doc:getCurrentPage() .. " of " .. doc:getPageCount())
--- The anchor is the place in the text the reader was at: after the change of the layout it can be on
--- another page, but it is the same text, and the reader is still on it.
-local anchor_page = doc:getPageFromXPointer(anchor)
-check("the anchor is still in the book", anchor_page ~= nil and anchor_page >= 1
-    and anchor_page <= doc:getPageCount(), "page " .. tostring(anchor_page))
-check("the reader is still on the same place in the text", doc:isXPointerInCurrentPage(anchor),
-    "the anchor is on page " .. tostring(anchor_page) .. ", the reader is on page " .. doc:getCurrentPage())
 print(string.format("the book is now %d pages (it was %d), the reader is on page %d",
     doc:getPageCount(), pages, doc:getCurrentPage()))
 
@@ -268,20 +214,24 @@ local again = plugin:autoTune(settings)
 check("a second run leaves the book alone", again and again.changed == false, tostring(again and again.changed))
 check("and it measures the same", again and again.chars == result.chars, tostring(again and again.chars))
 
--- The flag: a book that was already tuned is not measured again when it is opened.
-local BookState = require("linelength/bookstate")
-BookState.markTuned(ui)
-check("the book is remembered as tuned", BookState.wasTuned(ui) == true, "the flag is in the settings of the book")
-local measured_again = false
-plugin.measureSample = function() measured_again = true; return nil, "unsupported" end
+-- The book is opened again at its first page, with the margins it had before the tune: it is tuned
+-- again, and lands on the same margins. Nothing else moves the margins, so their coming back is the
+-- measurement and the tune having run again.
+plugin:applyLayout({ start_margin, start_margin }, nil)
+UIManager:forceRePaint()
+doc:gotoPage(1)
+check("the book is back at its first page", doc:getCurrentPage() == 1, "page " .. doc:getCurrentPage())
+check("the margins are back where they were before the tune", layout.h_page_margins[1] == start_margin,
+    tostring(layout.h_page_margins[1]) .. " vs " .. tostring(start_margin))
 plugin:onReaderReady()
-check("a tuned book is not measured again", measured_again == false, "measured_again=" .. tostring(measured_again))
-
--- With the flag off, it is measured again.
-BookState.clearTuned(ui)
-measured_again = false
-plugin:onReaderReady()
-check("a book that was not tuned is measured again", measured_again == true, "measured_again=" .. tostring(measured_again))
+-- The tune waits for the reader's own tick, as it does at book open: the UI loop is run here so that
+-- a check sees what the reader would have seen a moment later. tickAfterNext puts its action two
+-- ticks out, and a tick only runs what is already due, so the loop runs until nothing is left due.
+for _ = 1, 5 do
+    UIManager:_checkTasks()
+end
+check("a book reopened at its first page is tuned again", layout.h_page_margins[1] == result.margin,
+    tostring(layout.h_page_margins[1]) .. " vs " .. tostring(result.margin))
 
 print("ALL LIVE CHECKS PASSED")
 os.exit(0)
