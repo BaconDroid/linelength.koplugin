@@ -34,7 +34,7 @@ expect("the auto-tune is off by default", Settings:read().enabled, false)
 expect("the band starts at 56", Settings:read().band_min, 56)
 expect("the band ends at 60", Settings:read().band_max, 60)
 expect("the target is 58", Settings:read().target, 58)
-expect("the margins start at 20", Settings:read().margin_min, 20)
+expect("the margins start at 10", Settings:read().margin_min, 10)
 expect("six pages in the middle", Settings:read().sample_middle, 6)
 
 -- The settings are written back as they were read, so a change the reader makes is kept.
@@ -47,13 +47,13 @@ expect("and the numbers with them", Settings:read().band_max, 60)
 -- The file is a plain Lua table, so a number written as a string stays a string. Lua refuses to
 -- compare a string with a number, and the menu compares the numbers it reads, so the numbers are
 -- taken back as numbers when they are read.
-stored.settings = { enabled = true, band_max = "60", margin_min = "20", sample_middle = "6" }
+stored.settings = { enabled = true, band_max = "60", margin_min = "10", sample_middle = "6" }
 local from_strings = Settings:read()
 expect("a number written as a string comes back as a number", type(from_strings.band_max), "number")
 expect("a number written as a string comes back as a number", type(from_strings.margin_min), "number")
 expect("a number written as a string comes back as a number", type(from_strings.sample_middle), "number")
 expect("and it is the number it was", from_strings.band_max, 60)
-expect("and it is the number it was", from_strings.margin_min, 20)
+expect("and it is the number it was", from_strings.margin_min, 10)
 expect("and it is the number it was", from_strings.sample_middle, 6)
 
 -- A value that is not a number at all falls back to the default, rather than reaching the loop.

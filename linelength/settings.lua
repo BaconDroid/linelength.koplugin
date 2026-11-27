@@ -7,11 +7,10 @@ local Settings = {}
 -- of the text is never touched: it is the reader's own.
 Settings.DEFAULTS = {
     enabled = false,
-    tune_once = true,
     band_min = 56,
     band_max = 60,
     target = 58,
-    margin_min = 20,
+    margin_min = 10,
     margin_max = 50,
     max_chars_per_step = 6,
     sample_first = 0,

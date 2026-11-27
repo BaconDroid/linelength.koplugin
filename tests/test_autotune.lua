@@ -21,7 +21,7 @@ local WIDTH = 632
 
 expect("band min", AutoTune.BAND_MIN, 56)
 expect("band max", AutoTune.BAND_MAX, 60)
-expect("margin min", AutoTune.MARGIN_MIN, 20)
+expect("margin min", AutoTune.MARGIN_MIN, 10)
 expect("margin max", AutoTune.MARGIN_MAX, 50)
 expect("characters per step", AutoTune.MAX_CHARS_PER_STEP, 6)
 expect("target", AutoTune.TARGET, 58)
@@ -111,7 +111,7 @@ expect("too short: the margins come in", narrower < 40, true)
 expect("too short: by at least a step", narrower <= 38, true)
 
 expectNil("margins at their limit: nothing to try", AutoTune.nextMargin(50, 100, WIDTH))
-expectNil("margins at their minimum: nothing to try", AutoTune.nextMargin(20, 30, WIDTH))
+expectNil("margins at their minimum: nothing to try", AutoTune.nextMargin(10, 30, WIDTH))
 
 -- A wide margin and very long lines: the bound is what stops the margins.
 local capped = AutoTune.nextMargin(40, 120, WIDTH, { margin_max = 50 })
@@ -145,14 +145,14 @@ expectNil("no measurement", AutoTune.nextMargin(10, 0, WIDTH))
 expectNil("no measurement, as text", AutoTune.nextMargin(10, "x", WIDTH))
 expectNil("no width", AutoTune.nextMargin(10, 60, nil))
 
-expect("start: a margin below the bound comes up", AutoTune.startMargin(5), 20)
+expect("start: a margin below the bound comes up", AutoTune.startMargin(5), 10)
 expect("start: a margin above the bound comes down", AutoTune.startMargin(90), 50)
 expect("start: a margin inside the bounds stays", AutoTune.startMargin(25), 25)
 expect("start: a margin is rounded", AutoTune.startMargin(25.6), 26)
-expect("start: no margin at all", AutoTune.startMargin(nil), 20)
+expect("start: no margin at all", AutoTune.startMargin(nil), 10)
 
 -- A margin outside the bounds comes back inside them first.
-expect("a margin below the bound comes back in", AutoTune.nextMargin(0, 70, WIDTH), 20)
+expect("a margin below the bound comes back in", AutoTune.nextMargin(0, 70, WIDTH), 10)
 expect("a margin above the bound comes back in", AutoTune.nextMargin(90, 40, WIDTH), 50)
 
 -- The loop the way the plugin runs it: the margins move by steps, each one measured, until the line
@@ -189,13 +189,13 @@ expect("a higher target means wider margins", aimed60 < aimed, true)
 -- the step stops at the edge of the band instead.
 expect("a target above the band aims at the edge", AutoTune.nextMargin(30, 70, WIDTH, { target = 90 }), 50)
 -- The lines are too short, so the margins come in; a target of 20 would ask for even shorter lines.
-expect("a target below the band aims at the edge", AutoTune.nextMargin(40, 45, WIDTH, { target = 20 }), 20)
+expect("a target below the band aims at the edge", AutoTune.nextMargin(40, 45, WIDTH, { target = 20 }), 10)
 
 -- Already at the target: there is nothing to try.
 expectNil("already at the target: nothing to try", AutoTune.nextMargin(20, 58, WIDTH, { target = 58 }))
 
 -- The margins come in when the lines are too short, and widen when they are too long.
-expect("too short: the margins come in", AutoTune.nextMargin(40, 45, WIDTH, { target = 55 }), 20)
+expect("too short: the margins come in", AutoTune.nextMargin(40, 45, WIDTH, { target = 55 }), 10)
 expect("too long: the margins widen", AutoTune.nextMargin(20, 70, WIDTH, { target = 55 }), 45)
 
 local margin, chars, steps, inside = simulate(10, 80)

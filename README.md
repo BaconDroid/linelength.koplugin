@@ -72,11 +72,10 @@ Both are also actions, so they can be put on a gesture.
 
 | Setting | What it means | Default |
 |:--------|:--------------|--------:|
-| Auto-tune when a book opens | tune the book when it is opened | off |
-| Tune each book once | do not tune a book that was already tuned | on |
+| Auto-tune when a book opens | tune the book when it is opened at its first page | off |
 | Shortest and longest line | the band the line length has to land in | 56 to 60 characters |
 | Target line length | the length the margins aim for | 58 characters |
-| Smallest and biggest margin | how far the margins may go | 20 to 50 |
+| Smallest and biggest margin | how far the margins may go | 10 to 50 |
 | Characters per step | how much the line length may change at one step | 6 |
 | Pages at the start, in the middle, at the end | the pages that are measured | 0, 6, 0 |
 | Steps at most | how many times the margins are changed | 6 |
@@ -85,7 +84,8 @@ The size of the text is never touched: it is the reader's own, and the margins a
 of a line is made of. The top and bottom margins are left alone too: they change how many lines fit
 on a page, not how many characters a line holds.
 
-The margins are saved with the book, the way KOReader saves the margins a reader sets by hand.
+The margins are saved with the book, the way KOReader saves the margins a reader sets by hand, and
+the book is tuned once: the next time it is opened, it keeps them.
 
 ## What the ranges are
 

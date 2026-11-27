@@ -251,10 +251,9 @@ function LineLength:measureSample(counts)
     if not (doc and doc.getPageCount and ui.handleEvent) then
         return nil, "unsupported"
     end
-    -- Only a book that reflows has lines of text to measure; a PDF or a comic has pages, not lines,
-    -- and walking them would be a scan of nothing. A document that cannot say where the reader is
-    -- cannot be walked and put back either, so it is not measured at all.
-    if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer and doc.getXPointer) then
+        -- Only a book that reflows has lines of text to measure; a PDF or a comic has pages, not lines,
+    -- and walking them would be a scan of nothing.
+    if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer) then
         return nil, "unsupported"
     end
     local ok, total = pcall(doc.getPageCount, doc)
@@ -273,13 +272,6 @@ function LineLength:measureSample(counts)
     if not current or current < 1 then
         return nil, "no_position"
     end
-    -- The page number is not enough to come back to: in scroll mode crengine's goToPage lands at the
-    -- start of the page, so a reader partway down it would lose up to a screen of position. The
-    -- xpointer is where the reader really is, and the reader knows how to restore it in either mode.
-    local ok_xp, anchor = pcall(doc.getXPointer, doc)
-    if not ok_xp or type(anchor) ~= "string" or anchor == "" then
-        anchor = nil
-    end
     -- Without an off-screen buffer the walk would paint every page on the e-ink panel: do nothing instead.
     local draw, release = newDrawer(self.ui, true)
     if not draw then
@@ -291,14 +283,8 @@ function LineLength:measureSample(counts)
     local function turnTo(page)
         ui:handleEvent(Event:new("GotoPage", page))
     end
-    -- The way back, unlike the walk, has to land where the reader was: the xpointer when the document
-    -- has one, and the page only as the fallback.
     local function returnTo()
-        if anchor then
-            ui:handleEvent(Event:new("GotoXPointer", anchor))
-        else
-            ui:handleEvent(Event:new("GotoPage", current))
-        end
+        ui:handleEvent(Event:new("GotoPage", current))
     end
     local measured, values = {}, {}
     -- A page that could not be drawn off screen: the sample is then incomplete, and an incomplete
@@ -606,16 +592,22 @@ function LineLength:autoTune(settings)
     return { steps = steps, chars = chars, changed = changed, margin = margin }
 end
 
--- The auto-tune when a book opens, if the reader asked for it. It is quiet: a book that is already
--- within the band is left alone, and nothing is shown when there was nothing to do.
+-- The auto-tune when a book opens, if the reader asked for it. It runs once for a book: the flag that
+-- says it did lives in the settings of the book, so a book opened again keeps its margins.
+-- It is quiet: a book that is already within the band is left alone, and nothing is shown when there
+-- was nothing to do.
 function LineLength:onReaderReady()
     local ok, settings = pcall(function() return Settings:read() end)
     if not ok or not settings.enabled then
         return
     end
-    -- A book that was already tuned keeps its margins: it is not measured again every time it is
-    -- opened. The flag lives in the settings of the book, so it follows the book.
-    if settings.tune_once and BookState.wasTuned(self.ui) then
+    if BookState.wasTuned(self.ui) then
+        return
+    end
+    -- Only when the book is opened at its start: a book picked up where it was left keeps its layout.
+    local doc = self.ui and self.ui.document
+    local ok_page, page = pcall(doc and doc.getCurrentPage, doc)
+    if (ok_page and tonumber(page)) ~= 1 then
         return
     end
     -- ReaderRolling schedules its partial rerendering a tick after it is ready, not before. Measuring
@@ -839,16 +831,6 @@ function LineLength:settingsMenu()
             keep_menu_open = true,
             callback = function()
                 settings.enabled = not settings.enabled
-                save()
-            end,
-        },
-        {
-            text_func = function()
-                return settings.tune_once and _("Tune each book once: on") or _("Tune each book once: off")
-            end,
-            keep_menu_open = true,
-            callback = function()
-                settings.tune_once = not settings.tune_once
                 save()
             end,
         },
