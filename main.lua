@@ -252,8 +252,9 @@ function LineLength:measureSample(counts)
         return nil, "unsupported"
     end
     -- Only a book that reflows has lines of text to measure; a PDF or a comic has pages, not lines,
-    -- and walking them would be a scan of nothing.
-    if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer) then
+    -- and walking them would be a scan of nothing. A document that cannot say where the reader is
+    -- cannot be walked and put back either, so it is not measured at all.
+    if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer and doc.getXPointer) then
         return nil, "unsupported"
     end
     local ok, total = pcall(doc.getPageCount, doc)
@@ -272,6 +273,13 @@ function LineLength:measureSample(counts)
     if not current or current < 1 then
         return nil, "no_position"
     end
+    -- The page number is not enough to come back to: in scroll mode crengine's goToPage lands at the
+    -- start of the page, so a reader partway down it would lose up to a screen of position. The
+    -- xpointer is where the reader really is, and the reader knows how to restore it in either mode.
+    local ok_xp, anchor = pcall(doc.getXPointer, doc)
+    if not ok_xp or type(anchor) ~= "string" or anchor == "" then
+        anchor = nil
+    end
     -- Without an off-screen buffer the walk would paint every page on the e-ink panel: do nothing instead.
     local draw, release = newDrawer(self.ui, true)
     if not draw then
@@ -279,10 +287,18 @@ function LineLength:measureSample(counts)
     end
     -- A page turn through the reader, not straight on the document: the reader keeps the page it is on
     -- and the view its state in step, so the page can be drawn and the reader put back afterwards.
-    -- Coming back to the page number is enough: crengine keeps the spot on the page, so a reader
-    -- partway through a page is put back on that spot and not at the top of the page.
+    -- The walk itself stays page-based: that is what makes skipping to an off-screen sample cheap.
     local function turnTo(page)
         ui:handleEvent(Event:new("GotoPage", page))
+    end
+    -- The way back, unlike the walk, has to land where the reader was: the xpointer when the document
+    -- has one, and the page only as the fallback.
+    local function returnTo()
+        if anchor then
+            ui:handleEvent(Event:new("GotoXPointer", anchor))
+        else
+            ui:handleEvent(Event:new("GotoPage", current))
+        end
     end
     local measured, values = {}, {}
     -- A page that could not be drawn off screen: the sample is then incomplete, and an incomplete
@@ -355,14 +371,14 @@ function LineLength:measureSample(counts)
     -- A failure to go back is a failure of the sample: the reader would be left on a sampled page.
     -- The two statuses are kept apart: the buffer is given back either way, but a reader left on a
     -- sampled page is a failure of the sample, not a success with a warning.
-    local ok_back, back_err = pcall(turnTo, current)
+    local ok_back, back_err = pcall(returnTo)
     local ok_release, release_err = pcall(release)
     if not ok_loop then
         logger.warn("linelength: could not walk the pages of the sample:", err)
         return nil, "error"
     end
     if not ok_back then
-        logger.warn("linelength: could not put the reader back on its page:", back_err)
+        logger.warn("linelength: could not put the reader back where it was:", back_err)
         return nil, "error"
     end
     if not ok_release then
@@ -536,7 +552,7 @@ function LineLength:autoTune(settings)
         middle = settings.sample_middle,
         last = settings.sample_last,
     }
-    local max_steps = settings.max_steps or 4
+    local max_steps = limits.max_steps
     local width = screenWidthUnits()
 
     local sample, reason = self:measureSample(counts)
@@ -602,20 +618,27 @@ function LineLength:onReaderReady()
     if settings.tune_once and BookState.wasTuned(self.ui) then
         return
     end
-    local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
-    if not ok_tune then
-        logger.warn("linelength: the auto-tune failed:", result)
-        return
-    end
-    -- Only a book that was really measured is remembered as tuned: a measurement that failed leaves
-    -- the book to be measured again the next time it is opened.
-    if not result or result.chars == nil then
-        return
-    end
-    BookState.markTuned(self.ui)
-    if result.changed then
-        logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
-    end
+    -- ReaderRolling schedules its partial rerendering a tick after it is ready, not before. Measuring
+    -- here would make every margin change a full re-render on the UI thread at book open, so the tune
+    -- waits for the reader's own tick; no message is shown, the automatic path is meant to be quiet.
+    UIManager:tickAfterNext(function()
+        local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
+        if not ok_tune then
+            logger.warn("linelength: the auto-tune failed:", result)
+            return
+        end
+        -- Only a book that was really measured is remembered as tuned: a measurement that failed leaves
+        -- the book to be measured again the next time it is opened.
+        if not result or result.chars == nil then
+            return
+        end
+        if not BookState.markTuned(self.ui) then
+            logger.warn("linelength: could not remember this book as tuned")
+        end
+        if result.changed then
+            logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
+        end
+    end)
 end
 
 function LineLength:showPage()
@@ -717,7 +740,9 @@ function LineLength:tuneNow()
             UIManager:show(InfoMessage:new{ text = _("Could not tune this book.") })
             return
         end
-        BookState.markTuned(self.ui)
+        if not BookState.markTuned(self.ui) then
+            logger.warn("linelength: could not remember this book as tuned")
+        end
         if result.changed then
             UIManager:show(InfoMessage:new{
                 text = T(_("Tuned to %1 characters."), n(result.chars)),

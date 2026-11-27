@@ -1271,18 +1271,36 @@ local function tests_sample()
         doc.pages = opts.pages or 100
         doc.current = opts.current or 1
         doc.gotos = {}
+        -- The place in the text, as crengine gives it: it names the page and the offset in it, so a
+        -- reader partway down a page can be put back where they were rather than at the page top.
+        doc.xpointer = opts.xpointer or (".p" .. doc.current .. "o0")
+        doc.gotos_xp = {}
         function doc:getPageCount() return self.pages end
         function doc:getCurrentPage() return self.current end
+        function doc:getXPointer() return self.xpointer end
         function doc:gotoPage(page)
             self.gotos[#self.gotos + 1] = page
             self.current = page
+            self.xpointer = ".p" .. page .. "o0"
             -- The lines of the page are the lines of the page the reader is on now: a fixture that
             -- kept the lines of the first page would measure the wrong page and pass on its numbers.
             self:setPage(page)
         end
+        function doc:gotoXPointer(xp)
+            self.gotos_xp[#self.gotos_xp + 1] = xp
+            -- The page the xpointer names, and the place on it: as crengine puts the reader back.
+            self.current = tonumber(xp:match("^%.p(%d+)") or "") or self.current
+            self.xpointer = xp
+            self:setPage(self.current)
+        end
         doc:setPage(doc.current)
         if opts.no_page_count then
             doc.getPageCount = nil
+        end
+        if opts.no_xpointer then
+            doc.getXPointer = nil
+        elseif opts.nil_xpointer then
+            doc.getXPointer = function() return nil end
         end
         local ui = { menu = newMenu(), highlight = newHighlight(), document = doc, rolling = {},
             view = { paintTo = function(_self, bb)
@@ -1290,13 +1308,19 @@ local function tests_sample()
             doc.drawn = (doc.drawn or 0) + 1
         end } }
         -- the reader answers a page turn the way ReaderRolling does: the document moves, the page is remembered
+        -- and the walk returns through the xpointer, which is what keeps a reader partway down a page in place
         function ui:handleEvent(ev)
-            if ev.name ~= "GotoPage" then return end
             doc.tried = doc.tried or {}
-            doc.tried[#doc.tried + 1] = ev.args[1]
+            doc.tried[#doc.tried + 1] = ev.name .. ":" .. tostring(ev.args[1])
             if opts.goto_raises then error("goto boom") end
-            doc:gotoPage(ev.args[1])
-            return true
+            if ev.name == "GotoPage" then
+                doc:gotoPage(ev.args[1])
+                return true
+            end
+            if ev.name == "GotoXPointer" then
+                doc:gotoXPointer(ev.args[1])
+                return true
+            end
         end
         return makePlugin({ document = {}, ui = ui }), ui, doc
     end
@@ -1327,10 +1351,12 @@ local function tests_sample()
     expect("sample: median", sample and sample.median, 60)
     expect("sample: min", sample and sample.min, 60)
     expect("sample: max", sample and sample.max, 60)
-    expect("sample: 6 page turns and the way back", #sdoc.gotos, 7)
+    expect("sample: 6 page turns and the way back by the xpointer", #sdoc.gotos, 6)
+    expect("sample: the way back is one xpointer", #sdoc.gotos_xp, 1)
+    expect("sample: back on the place it started from", sdoc.xpointer, ".p3o0")
     expect("sample: back on the page it started from", sdoc.current, 3)
     expect("sample: the first sample page", sdoc.gotos[1], 48)
-    expect("sample: the last sample page", sdoc.gotos[#sdoc.gotos - 1], 53)
+    expect("sample: the last sample page", sdoc.gotos[#sdoc.gotos], 53)
 
     -- 12b. the page on screen outside the sample is measured too, and no page turn goes to a page twice
     reset()
@@ -1340,7 +1366,8 @@ local function tests_sample()
     expect("sample: the current page outside the sample is left out", sample2 and #sample2.values, 6)
     expect("sample: the first sampled page is in the middle of the book", sample2 and sample2.pages[1].page, 48)
     expect("sample: back where it started", sdoc2.current, 20)
-    expect("sample: one page turn per sampled page, and the way back", #sdoc2.gotos, 7)
+    expect("sample: one page turn per sampled page, and the way back by the xpointer", #sdoc2.gotos, 6)
+    expect("sample: and one way back", #sdoc2.gotos_xp, 1)
 
     -- 12c. a book shorter than the sample: every page once, no page turn out of the book
     reset()
@@ -1348,8 +1375,9 @@ local function tests_sample()
     local sp3, _ui3, sdoc3 = sampleBook({ pages = 4, current = 1 })
     local sample3 = sp3:measureSample()
     expect("short book: every page once", sample3 and #sample3.values, 4)
-    expect("short book: four page turns (pages 2 to 4 and back)", #sdoc3.gotos, 4)
-    expect("short book: the pages visited", pageTurns(sdoc3), "2,3,4,1")
+    expect("short book: three page turns (pages 2 to 4) and one way back", #sdoc3.gotos, 3)
+    expect("short book: the pages visited", pageTurns(sdoc3), "2,3,4")
+    expect("short book: and the way back", sdoc3.gotos_xp[1], ".p1o0")
 
     -- 12d. configured counts: 2 first, 2 middle, 2 last
     reset()
@@ -1357,7 +1385,9 @@ local function tests_sample()
     local sp4, _ui4, sdoc4 = sampleBook({ pages = 50, current = 1 })
     local sample4 = sp4:measureSample({ first = 2, middle = 2, last = 2 })
     expect("configured counts: 6 pages", sample4 and #sample4.values, 6)
-    expect("configured counts: the pages asked for", pageTurns(sdoc4), "2,25,26,49,50,1")
+    expect("configured counts: the pages asked for", pageTurns(sdoc4), "2,25,26,49,50")
+    expect("configured counts: and the way back", sdoc4.gotos_xp[1], ".p1o0")
+    expect("configured counts: the walk never goes back to the page it started on", #sdoc4.gotos, 5)
 
     -- 12e. a book that cannot be sampled: a reason, no crash
     reset()
@@ -1377,8 +1407,27 @@ local function tests_sample()
     expect("no reader to turn pages: nothing measured", nothing6b, nil)
     expect("no reader to turn pages: unsupported", reason6b, "unsupported")
 
-    -- 12f. the reader fails going to a page: no error escapes, the buffer is given back
+    -- A book whose document cannot name its place in the text is not one the plugin can walk: the
+    -- guard at the top of measureSample says so, rather than walking blind and leaving the reader put
+    -- back on a page number the walk itself has just invalidated.
     reset()
+    local sp6c, _ui6c, _sdoc6c = sampleBook({ pages = 100, current = 20, no_xpointer = true })
+    local nothing6c, reason6c = sp6c:measureSample()
+    expect("no way to name the place: nothing measured", nothing6c, nil)
+    expect("no way to name the place: unsupported", reason6c, "unsupported")
+
+    -- The document has the function but gives nothing back: the sample still happens, and the reader
+    -- is put back on the page it was on, so a book is not left on a sampled page.
+    reset()
+    buffers.created, draws.n, repaints.n = {}, 0, 0
+    local sp6d, _ui6d, sdoc6d = sampleBook({ pages = 100, current = 20, nil_xpointer = true })
+    local sample6d = sp6d:measureSample()
+    expect("no place in the text: the book is still measured", type(sample6d), "table")
+    expect("no place in the text: back on the page", sdoc6d.current, 20)
+    expect("no place in the text: the page is what the reader is sent back to",
+        sdoc6d.tried[#sdoc6d.tried], "GotoPage:20")
+
+    -- 12f. the reader fails going to a page: no error escapes, the buffer is given back
     buffers.created, draws.n, repaints.n = {}, 0, 0
     local sp7, _ui7 = sampleBook({ pages = 100, current = 1, goto_raises = true })
     local ok7, maybe7, reason7 = pcall(function() return sp7:measureSample() end)
@@ -1386,8 +1435,9 @@ local function tests_sample()
     expect("goto fails: nothing measured", maybe7, nil)
     expect("goto fails: the reason is logged as an error", reason7, "error")
     expect("goto fails: the buffer is still given back", buffers.created[1] and buffers.created[1].freed, 1)
-    expect("goto fails: the reader is still asked to go back to its page",
-        _ui7.document.tried[#_ui7.document.tried], 1)
+    -- The way back is attempted even when the walk failed: the reader is not left on a sampled page.
+    expect("goto fails: the reader is still sent back to its place",
+        _ui7.document.tried[#_ui7.document.tried], "GotoXPointer:.p1o0")
 
     -- 12g. no page can be read: nothing measured, and the buffer is given back
     reset()
