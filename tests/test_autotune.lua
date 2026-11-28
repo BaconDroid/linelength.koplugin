@@ -45,6 +45,14 @@ expect("the steps are the tune's own", limits.max_steps, AutoTune.MAX_STEPS)
 expect("the margins default to their bounds", limits.margin_min, AutoTune.MARGIN_MIN)
 expect("the margins default to their bounds", limits.margin_max, AutoTune.MARGIN_MAX)
 
+-- A hand-edited settings file can leave the pair the wrong way round: the band is put right, so
+-- inBand has a band to test against and the middle is the middle of the two numbers the reader meant.
+local reversed = AutoTune.limits({ band_min = 70, band_max = 50, margin_min = 10, margin_max = 50 })
+expect("a reversed band is put the right way round", reversed.band_min, 50)
+expect("a reversed band is put the right way round", reversed.band_max, 70)
+expect("and the middle is the middle of the two", reversed.target, 60)
+expect("a reversed band still holds a line", AutoTune.inBand(60, reversed), true)
+
 local set_margins = AutoTune.limits({ margin_min = 20, margin_max = 40 })
 expect("the smallest margin is a setting", set_margins.margin_min, 20)
 expect("the biggest margin is a setting", set_margins.margin_max, 40)
