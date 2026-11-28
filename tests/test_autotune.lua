@@ -24,7 +24,6 @@ expect("band max", AutoTune.BAND_MAX, 60)
 expect("margin min", AutoTune.MARGIN_MIN, 10)
 expect("margin max", AutoTune.MARGIN_MAX, 50)
 expect("characters per step", AutoTune.MAX_CHARS_PER_STEP, 6)
-expect("target", AutoTune.TARGET, 58)
 
 expect("in band: 56", AutoTune.inBand(56), true)
 expect("in band: 60", AutoTune.inBand(60), true)
@@ -40,7 +39,7 @@ expect("out of band: text", AutoTune.inBand("x"), false)
 local limits = AutoTune.limits()
 expect("the band is the tune's own", limits.band_min, AutoTune.BAND_MIN)
 expect("the band is the tune's own", limits.band_max, AutoTune.BAND_MAX)
-expect("the target is the tune's own", limits.target, AutoTune.TARGET)
+expect("the target is the middle of the band", limits.target, math.floor((limits.band_min + limits.band_max) / 2 + 0.5))
 expect("the step is the tune's own", limits.max_chars_per_step, AutoTune.MAX_CHARS_PER_STEP)
 expect("the steps are the tune's own", limits.max_steps, AutoTune.MAX_STEPS)
 expect("the margins default to their bounds", limits.margin_min, AutoTune.MARGIN_MIN)
@@ -154,10 +153,10 @@ local function simulate(start_margin, measured, chars_at_margin)
 end
 
 -- The step aims at the target: the same book, a different target, a different margin.
-local aimed = AutoTune.nextMargin(40, 53, WIDTH, { target = 55 })
+local aimed = AutoTune.nextMargin(40, 53, WIDTH, { band_min = 53, band_max = 57 })
 expect("the step aims at the target", aimed < 40, true)
-local aimed60 = AutoTune.nextMargin(40, 53, WIDTH, { target = 60 })
-expect("a higher target means wider margins", aimed60 < aimed, true)
+local aimed60 = AutoTune.nextMargin(40, 53, WIDTH, { band_min = 58, band_max = 62 })
+expect("a band centred higher means wider margins", aimed60 < aimed, true)
 
 -- A target outside the band does not make the loop wander: the step aims at the edge of the band.
 -- The lines are too long, so the margins widen; a target of 90 would ask for even longer lines, so
