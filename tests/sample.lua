@@ -3,7 +3,7 @@
 -- that run on a device. See tests/render.lua for how to get a KOReader build to run this with:
 --   cd <koreader>/lib/koreader
 --   HOME=<empty dir> PLUGIN_DIR=<this repo> BOOK=<file.epub> SDL_VIDEODRIVER=dummy \
---     EMULATE_READER_W=1264 EMULATE_READER_H=1680 EMULATE_READER_DPI=300 ./luajit <this repo>/tests/live_sample.lua
+--     EMULATE_READER_W=1264 EMULATE_READER_H=1680 EMULATE_READER_DPI=300 ./luajit <this repo>/tests/sample.lua
 io.stdout:setvbuf("line")
 os.setlocale("C", "numeric")
 require("setupkoenv")

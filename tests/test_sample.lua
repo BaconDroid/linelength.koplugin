@@ -1,4 +1,3 @@
--- Unit tests for linelength/sample.lua. Run through tests/run.py (lupa), not on the device.
 package.path = "./?.lua;" .. package.path
 local Sample = require("linelength/sample")
 
@@ -53,6 +52,9 @@ expectList("nil counts use defaults", Sample.pages(50, nil, nil, nil), { 23, 24,
 expectList("text counts use defaults", Sample.pages(50, "x", "y", "z"), { 23, 24, 25, 26, 27, 28 })
 expectList("fractional counts floor", Sample.pages(50, 2.9, 2.9, 2.9), { 1, 2, 25, 26, 49, 50 })
 expectList("counts beyond the book clamp", Sample.pages(5, 100, 100, 100), { 1, 2, 3, 4, 5 })
+expectList("10 pages, counts 8/2/1: every page once", Sample.pages(10, 8, 2, 1), { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 })
+expectList("10 pages, counts 4/4/4: every page once", Sample.pages(10, 4, 4, 4), { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 })
+expectList("6 pages, counts 3/3/3: every page once", Sample.pages(6, 3, 3, 3), { 1, 2, 3, 4, 5, 6 })
 expectList("count of 1", Sample.pages(20, 1, 1, 1), { 1, 10, 20 })
 
 local seen, repeated = {}, false
