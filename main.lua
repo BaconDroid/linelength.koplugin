@@ -505,44 +505,13 @@ end
 -- only three, and they are kept the way KOReader keeps a plugin's settings, in the reader's own
 -- settings file.
 function LineLength:settings()
-    local enabled = G_reader_settings:readSetting("linelength_auto_tune")
-    local margin_min = tonumber(G_reader_settings:readSetting("linelength_margin_min"))
-    local margin_max = tonumber(G_reader_settings:readSetting("linelength_margin_max"))
-    if enabled == nil and not margin_min and not margin_max then
-        return self:migrateLegacySettings()
-    end
     return {
-        enabled = enabled == true,
-        margin_min = margin_min or AutoTune.MARGIN_MIN,
-        margin_max = margin_max or AutoTune.MARGIN_MAX,
+        enabled = G_reader_settings:isTrue("linelength_auto_tune"),
+        margin_min = tonumber(G_reader_settings:readSetting("linelength_margin_min")) or AutoTune.MARGIN_MIN,
+        margin_max = tonumber(G_reader_settings:readSetting("linelength_margin_max")) or AutoTune.MARGIN_MAX,
     }
 end
 
--- A build of this branch kept the same three in a settings file of its own, linelength.lua. They are
--- read once here and kept in the reader's settings from then on, so that a reader who had set them
--- does not find them gone.
-function LineLength:migrateLegacySettings()
-    local settings = {
-        enabled = false,
-        margin_min = AutoTune.MARGIN_MIN,
-        margin_max = AutoTune.MARGIN_MAX,
-    }
-    local ok, legacy = pcall(function()
-        local DataStorage = require("datastorage")
-        local LuaSettings = require("luasettings")
-        return LuaSettings:open(DataStorage:getSettingsDir() .. "/linelength.lua"):readSetting("settings")
-    end)
-    if ok and type(legacy) == "table" then
-        settings.enabled = legacy.enabled == true
-        settings.margin_min = tonumber(legacy.margin_min) or settings.margin_min
-        settings.margin_max = tonumber(legacy.margin_max) or settings.margin_max
-    end
-    G_reader_settings:saveSetting("linelength_auto_tune", settings.enabled)
-    G_reader_settings:saveSetting("linelength_margin_min", settings.margin_min)
-    G_reader_settings:saveSetting("linelength_margin_max", settings.margin_max)
-    G_reader_settings:flush()
-    return settings
-end
 
 -- The settings of the auto-tune, as a menu: a switch, and the numbers that decide what it does.
 -- Each number is a step of 1, and the menu shows what it is set to now.
