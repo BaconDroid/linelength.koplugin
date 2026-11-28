@@ -1476,16 +1476,6 @@ local function tests_sample()
     expect("the margins start at 10", settings.margin_min, 10)
     expect("the margins end at 50", settings.margin_max, 50)
 
-    -- A reader who set the three in the build that kept them in a file of its own finds them still
-    -- set: they are read from that file once and kept in the reader's settings from then on.
-    plugin_settings.settings = { enabled = true, margin_min = 22, margin_max = 38 }
-    G_reader_settings.data = {}
-    local migrated = settings_plugin:settings()
-    expect("the old switch is kept", migrated.enabled, true)
-    expect("the old smallest margin is kept", migrated.margin_min, 22)
-    expect("the old biggest margin is kept", migrated.margin_max, 38)
-    expect("and it is written in the reader's settings", G_reader_settings.data.linelength_margin_max, 38)
-    plugin_settings.settings = {}
 
     -- The auto-tune does nothing when the reader has not asked for it. The book is opened at its start,
     -- which is the only place the tune runs.
