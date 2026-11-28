@@ -127,6 +127,25 @@ local function expect(name, got, want)
     end
 end
 
+-- The plugin's own settings file, as KOReader keeps it: a table of settings, read and written as one.
+local plugin_settings = { settings = {} }
+package.preload["datastorage"] = function()
+    return { getSettingsDir = function() return "/tmp/koreader/settings" end }
+end
+package.preload["luasettings"] = function()
+    return { open = function()
+        return {
+            readSetting = function(_self, key, default)
+                local value = plugin_settings[key]
+                if value == nil then return default end
+                return value
+            end,
+            writeSetting = function(_self, key, value) plugin_settings[key] = value end,
+            flush = function() end,
+        }
+    end }
+end
+
 local LineLength = require("main")
 expect("plugin name", LineLength.name, "linelength")
 expect("only loads inside a book", LineLength.is_doc_only, true)
@@ -283,12 +302,23 @@ expect("Search stays where it was", rows[5][2], "12_search")
 local function fakeDoc(line_texts, opts)
     opts = opts or {}
     local NODE = "/b/p[1]/text()[1]"
+    -- The lines of a page depend on the page: a test that measures the wrong page is caught.
+    local page = 1
     local lines, offset = {}, 0
-    for i, s in ipairs(line_texts) do
-        lines[i] = { s = s, from = offset, to = offset + #s, y = 71 + (i - 1) * 64 }
-        offset = offset + #s + 1
+    local function layout()
+        lines, offset = {}, 0
+        for i, text in ipairs(line_texts) do
+            local shown = text
+            if opts.per_page then
+                shown = string.rep(text:sub(1, 1), opts.per_page(page) or #text)
+            end
+            lines[i] = { s = shown, from = offset, to = offset + #shown, y = 71 + (i - 1) * 64 }
+            offset = offset + #shown + 1
+        end
     end
+    layout()
     local d = {}
+    function d:setPage(p) page = p; layout() end
     function d:getTextFromPositions(p0, _p1)
         if opts.raises then error("engine boom") end
         if p0.y == 0 then
@@ -351,7 +381,10 @@ expect("sample menu item text", items.linelength_sample and items.linelength_sam
 expect("sample menu item goes in the Typeset menu", items.linelength_sample and items.linelength_sample.sorting_hint, "typeset")
 local item_count = 0
 for _k in pairs(items) do item_count = item_count + 1 end
-expect("two menu items", item_count, 2)
+expect("three menu items", item_count, 3)
+expect("the settings menu item", items.linelength_settings and items.linelength_settings.text, "Line length: settings")
+expect("the settings menu item goes in the Typeset menu", items.linelength_settings and items.linelength_settings.sorting_hint, "typeset")
+expect("the settings menu has a sub menu", type(items.linelength_settings and items.linelength_settings.sub_item_table_func), "function")
 expect("sample action registered", type(actions["linelength_sample"]), "table")
 expect("sample action event", actions["linelength_sample"] and actions["linelength_sample"].event, "LinelengthSample")
 expect("sample action title", actions["linelength_sample"] and actions["linelength_sample"].title,
@@ -1126,8 +1159,10 @@ local function tests_sample()
     -- 12. a sample of pages: the page on screen first, the other pages drawn off screen, the reader put back.
     local function sampleBook(opts)
         opts = opts or {}
+        -- A different length per line, and the lines of the page come from the document, so a
+        -- measurement of the wrong page is caught instead of passing on the same numbers.
         local lines = opts.lines or { ("w"):rep(60), ("x"):rep(55), ("y"):rep(50) }
-        local doc = fakeDoc(lines, { raises = opts.raises })
+        local doc = fakeDoc(lines, { raises = opts.raises, per_page = opts.per_page })
         doc.pages = opts.pages or 100
         doc.current = opts.current or 1
         doc.gotos = {}
@@ -1170,8 +1205,11 @@ local function tests_sample()
     local sample = sp:measureSample()
     expect("sample: measured", type(sample), "table")
     expect("sample: total pages", sample and sample.total, 100)
-    expect("sample: the page on screen is measured first", sample and sample.pages[1].page, 3)
-    expect("sample: 7 pages read (the page on screen, then six from the middle)", sample and #sample.values, 7)
+    -- The reader is on page 3, which is not one of the six sampled pages of the middle: it is left
+    -- out, so that the median is the median of the sample and not of the sample and one more.
+    expect("sample: the first sampled page is in the middle of the book", sample and sample.pages[1].page, 48)
+    expect("sample: the sample is the six pages of the middle", #sample.values, 6)
+    expect("sample: 6 pages read", sample and #sample.values, 6)
     expect("sample: only the six other pages are drawn", sdoc.drawn, 6)
     expect("sample: one buffer", #buffers.created, 1)
     expect("sample: the buffer is given back", buffers.created[1] and buffers.created[1].freed, 1)
@@ -1190,8 +1228,8 @@ local function tests_sample()
     buffers.created, draws.n, repaints.n = {}, 0, 0
     local sp2, _ui2, sdoc2 = sampleBook({ pages = 100, current = 20 })
     local sample2 = sp2:measureSample()
-    expect("sample: 7 pages read when the current page is outside the sample", sample2 and #sample2.values, 7)
-    expect("sample: the current page comes first", sample2 and sample2.pages[1].page, 20)
+    expect("sample: the current page outside the sample is left out", sample2 and #sample2.values, 6)
+    expect("sample: the first sampled page is in the middle of the book", sample2 and sample2.pages[1].page, 48)
     expect("sample: back where it started", sdoc2.current, 20)
     expect("sample: one page turn per sampled page, and the way back", #sdoc2.gotos, 7)
 
@@ -1267,6 +1305,84 @@ local function tests_sample()
     local sp10 = sampleBook({ pages = 100, current = 1 })
     expect("sample action event", actions["linelength_sample"] and actions["linelength_sample"].event, "LinelengthSample")
     expect("sample event handler exists", type(sp10.onLinelengthSample), "function")
+    -- The handler has to do the work: a handler that does nothing would pass a type check.
+    local shown_count = 0
+    sp10.showSample = function() shown_count = shown_count + 1 end
+    sp10:onLinelengthSample()
+    expect("the sample handler measures the book", shown_count, 1)
+
+    -- 13. the auto-tune: the settings, the switch, and the numbers in the menu.
+    local Settings = require("linelength/settings")
+    local settings = Settings:read()
+    expect("the auto-tune is off by default", settings.enabled, false)
+    expect("the band starts at 56", settings.band_min, 56)
+    expect("the band ends at 60", settings.band_max, 60)
+    expect("the target is 58", settings.target, 58)
+    expect("the margins start at 20", settings.margin_min, 20)
+    expect("six pages in the middle", settings.sample_middle, 6)
+    expect("no pages at the start", settings.sample_first, 0)
+    expect("no pages at the end", settings.sample_last, 0)
+    expect("six steps at most", settings.max_steps, 6)
+
+    settings.enabled = true
+    Settings:write(settings)
+    expect("the settings are kept", Settings:read().enabled, true)
+    settings.enabled = false
+    Settings:write(settings)
+
+    -- The auto-tune does nothing when the reader has not asked for it.
+    local auto_plugin = LineLength:new{ document = {}, ui = { menu = newMenu(), highlight = newHighlight() } }
+    auto_plugin:init()
+    local called = false
+    auto_plugin.autoTune = function() called = true end
+    local real_read = Settings.read
+    Settings.read = function(self) return { enabled = false } end
+    auto_plugin:onReaderReady()
+    expect("the auto-tune stays off when it is not asked for", called, false)
+    Settings.read = function(self) return { enabled = true } end
+    auto_plugin:onReaderReady()
+    expect("the auto-tune runs when it is asked for", called, true)
+    Settings.read = real_read
+
+    -- The settings menu: a switch and the numbers, each with a step of one.
+    local menu = auto_plugin:settingsMenu()
+    expect("the settings menu has entries", #menu > 0, true)
+    local found_switch, found_numbers = false, 0
+    for _i, item in ipairs(menu) do
+        if item.text_func then
+            local text = item.text_func()
+            if type(text) == "string" and text:find("Auto%-tune") then
+                found_switch = true
+            end
+        end
+        if item.sub_item_table then
+            found_numbers = found_numbers + 1
+        end
+    end
+    expect("the settings menu has the switch", found_switch, true)
+    expect("the settings menu has the numbers", found_numbers >= 8, true)
+
+    -- The switch flips the setting and keeps it.
+    local before = Settings:read().enabled
+    menu[1].callback()
+    expect("the switch flips the setting", Settings:read().enabled, not before)
+    menu[1].callback()
+    expect("and flips it back", Settings:read().enabled, before)
+
+    -- A number goes up and down by one.
+    local band_item = nil
+    for _i, item in ipairs(menu) do
+        if item.sub_item_table then
+            local label = item.text_func()
+            if label:find("Longest line") then band_item = item end
+        end
+    end
+    expect("the longest line is in the menu", band_item ~= nil, true)
+    local value = Settings:read().band_max
+    band_item.sub_item_table[2].callback()
+    expect("a number goes up by one", Settings:read().band_max, value + 1)
+    band_item.sub_item_table[1].callback()
+    expect("and back down", Settings:read().band_max, value)
 end
 
 tests_sample()

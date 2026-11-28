@@ -22,6 +22,8 @@ local PageLines = require("linelength/pagelines")
 local Rating = require("linelength/rating")
 local Report = require("linelength/report")
 local Sample = require("linelength/sample")
+local AutoTune = require("linelength/autotune")
+local Settings = require("linelength/settings")
 
 local LineLength = WidgetContainer:extend{
     name = "linelength",
@@ -168,12 +170,19 @@ local function newDrawer(ui, off_screen_only)
                 if off_screen then
                     local painted, err = pcall(view.paintTo, view, buffer, 0, 0)
                     if painted then
-                        return
+                        return true
                     end
-                    logger.warn("linelength: could not draw the page off screen, drawing it on the screen:", err)
+                    logger.warn("linelength: could not draw the page off screen:", err)
+                    if off_screen_only then
+                        -- Drawing off screen failed: the sample stops there rather than painting every
+                        -- page on the e-ink panel, which is what the reader would see.
+                        off_screen = false
+                        return false
+                    end
                     off_screen = false
                 end
                 UIManager:forceRePaint()
+                return true
             end
             local function release() buffer:free() end
             return draw, release
@@ -227,12 +236,12 @@ local function sampleCounts(counts)
         counts.last or Sample.DEFAULT_LAST
 end
 
---- Measures the longest line of each page of a sample of the book, without showing those pages.
--- The page on screen is measured first, because it is already laid out and it is the page the reader is
--- looking at. The other pages are reached with a page turn and drawn into a buffer nobody sees (see
--- newDrawer), then the reader is put back where it was. Nothing is refreshed: KOReader marks the view as
--- not drawn when the page changes and leaves the e-ink panel alone until the next UIManager cycle, so a
--- whole sample is walked through without a single blink.
+-- The longest line of each page of a sample of the book, without showing those pages.
+-- The longest line of each page of a sample of the book, measured off screen.
+-- The pages are reached with a page turn and drawn into a buffer nobody sees (see newDrawer), then the
+-- reader is put back where it was. Nothing is refreshed: KOReader marks the view as not drawn when the
+-- page changes and leaves the e-ink panel alone until the next UIManager cycle, so a whole sample is
+-- walked through without a single blink.
 -- Returns nil and a reason when the book cannot be sampled; otherwise a table with `pages` (page number
 -- and characters of each page that could be read), `values` (those character counts), `median`, `min`,
 -- `max` and `total` (the number of pages in the book).
@@ -242,8 +251,13 @@ function LineLength:measureSample(counts)
     if not (doc and doc.getPageCount and ui.handleEvent) then
         return nil, "unsupported"
     end
-    local ok_count, total = pcall(doc.getPageCount, doc)
-    if not ok_count or type(total) ~= "number" or total < 1 then
+    -- Only a book that reflows has lines of text to measure; a PDF or a comic has pages, not lines,
+    -- and walking them would be a scan of nothing.
+    if not (doc.getTextFromPositions and doc.getScreenPositionFromXPointer) then
+        return nil, "unsupported"
+    end
+    local ok, total = pcall(doc.getPageCount, doc)
+    if not ok or type(total) ~= "number" or total < 1 then
         return nil, "empty"
     end
     local first, middle, last = sampleCounts(counts)
@@ -252,8 +266,12 @@ function LineLength:measureSample(counts)
         return nil, "empty"
     end
 
-    local ok_start, current = pcall(doc.getCurrentPage, doc)
-    current = ok_start and tonumber(current) or nil
+    -- Without a page to come back to, the walk would leave the reader on a sampled page.
+    local ok, current = pcall(doc.getCurrentPage, doc)
+    current = ok and tonumber(current) or nil
+    if not current or current < 1 then
+        return nil, "no_position"
+    end
     -- Without an off-screen buffer the walk would paint every page on the e-ink panel: do nothing instead.
     local draw, release = newDrawer(self.ui, true)
     if not draw then
@@ -265,8 +283,18 @@ function LineLength:measureSample(counts)
         ui:handleEvent(Event:new("GotoPage", page))
     end
     local measured, values = {}, {}
-    local ok_walk, err = pcall(function()
-        if current then
+    local ok_loop, err = pcall(function()
+        -- The page the reader is on is measured first, when it is one of the sampled pages: it is
+        -- already laid out, so it costs nothing, and it does not have to be visited again. A page
+        -- outside the sample is left out, or it would weigh on the median of the sample.
+        local current_is_sampled = false
+        for _i, page in ipairs(pages) do
+            if page == current then
+                current_is_sampled = true
+                break
+            end
+        end
+        if current and current_is_sampled then
             local report = pageReport(ui)
             if report then
                 measured[#measured + 1] = { page = current, chars = report.chars }
@@ -276,8 +304,25 @@ function LineLength:measureSample(counts)
         for _i, page in ipairs(pages) do
             if page ~= current then
                 turnTo(page)
-                draw()
+                if draw() == false then
+                    return -- the page could not be drawn off screen: the sample stops here
+                end
+                -- A page that is still being laid out would give the numbers of the previous layout:
+                -- it is drawn and measured again until it holds still.
                 local report = pageReport(ui)
+                for _try = 1, SETTLE_TRIES do
+                    local ok, delayed = pcall(function() return doc:isRerenderingDelayed() end)
+                    if not (ok_delayed and delayed) then
+                        break
+                    end
+                    if draw() == false then
+                        return
+                    end
+                    local again = pageReport(ui)
+                    if not sameReport(report, again) then
+                        report = again
+                    end
+                end
                 if report then
                     measured[#measured + 1] = { page = page, chars = report.chars }
                     values[#values + 1] = report.chars
@@ -286,15 +331,18 @@ function LineLength:measureSample(counts)
         end
     end)
     -- The way back is its own step: a page that could not be read still leaves the reader where it was.
-    if current then
-        pcall(turnTo, current)
-    end
-    local ok_release, release_err = pcall(release)
-    if not ok_walk then
+    -- A failure to go back is a failure of the sample: the reader would be left on a sampled page.
+    local ok, back_err = pcall(turnTo, current)
+    local ok, release_err = pcall(release)
+    if not ok_loop then
         logger.warn("linelength: could not walk the pages of the sample:", err)
         return nil, "error"
     end
-    if not ok_release then
+    if not ok then
+        logger.warn("linelength: could not put the reader back on its page:", back_err)
+        return nil, "error"
+    end
+    if not ok then
         logger.warn("linelength: could not release the off-screen buffer:", release_err)
     end
     if #values == 0 then
@@ -447,6 +495,91 @@ function LineLength:onControl(card, session, id)
     end
 end
 
+-- The auto-tune: measures the line length of a sample of the book and, when it is outside the band the
+-- reader asked for, moves the margins until it is inside. The size of the text is the reader's own and
+-- is never touched. Every step is measured again, so the loop stops on what the book really holds.
+-- The margins of the book, moved until the lines hold the number of characters the reader asked for.
+-- The size of the text is never touched: it is the reader's own. Every step is measured again, so the
+-- loop stops on what the book really holds and not on what the formula predicts.
+function LineLength:autoTune(settings)
+    settings = settings or {}
+    local limits = {
+        margin_min = settings.margin_min,
+        margin_max = settings.margin_max,
+        max_chars_per_step = settings.max_chars_per_step,
+        target = settings.target,
+    }
+    local counts = {
+        first = settings.sample_first,
+        middle = settings.sample_middle,
+        last = settings.sample_last,
+    }
+    local max_steps = settings.max_steps or 4
+    local width = screenWidthUnits()
+
+    local sample, reason = self:measureSample(counts)
+    if not sample then
+        logger.warn("linelength: could not measure the book for the auto-tune:", reason)
+        return nil
+    end
+    local chars = sample.median
+    local steps, changed = 0, false
+    local layout = self:currentLayout()
+    if not layout then
+        return nil
+    end
+    -- The calculation starts from the margin the book really has, even when it is outside the bounds:
+    -- the measurement was taken at that margin, and it is what the next step has to answer for.
+    local margin = tonumber(layout.margins[1]) or AutoTune.MARGIN_MIN
+    -- A margin outside the bounds comes back inside them, even when the lines are already in the band:
+    -- the bounds are what the reader asked for, and a margin of zero or a huge one is not what they want.
+    if margin < limits.margin_min or margin > limits.margin_max then
+        margin = math.max(limits.margin_min, math.min(limits.margin_max, margin))
+        self:applyLayout({ margin, margin }, nil)
+        changed = true
+        steps = steps + 1
+        local again = self:measureSample(counts)
+        if not again then
+            return { steps = steps, chars = chars, changed = changed, margin = margin }
+        end
+        chars = again.median
+    end
+
+    while not AutoTune.inBand(chars) and steps < max_steps do
+        local next_margin = AutoTune.nextMargin(margin, chars, width, limits)
+        if not next_margin then
+            break -- nothing more can be tried: the book is as good as it can get
+        end
+        self:applyLayout({ next_margin, next_margin }, nil)
+        margin = next_margin
+        changed = true
+        steps = steps + 1
+        local again = self:measureSample(counts)
+        if not again then
+            break
+        end
+        chars = again.median
+    end
+    return { steps = steps, chars = chars, changed = changed, margin = margin }
+end
+
+-- The auto-tune when a book opens, if the reader asked for it. It is quiet: a book that is already
+-- within the band is left alone, and nothing is shown when there was nothing to do.
+function LineLength:onReaderReady()
+    local ok, settings = pcall(function() return Settings:read() end)
+    if not ok or not settings.enabled then
+        return
+    end
+    local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
+    if not ok_tune then
+        logger.warn("linelength: the auto-tune failed:", result)
+        return
+    end
+    if result and result.changed then
+        logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
+    end
+end
+
 function LineLength:showPage()
     local ok, report, reason = pcall(pageReport, self.ui)
     if not ok then
@@ -484,9 +617,17 @@ end
 
 -- Measures a sample of the book's pages and shows the result. The book is laid out again on every page
 -- that is measured, so this takes a few seconds on a device and the reader sees a "measuring" message.
+-- The measurement waits for the next UI tick, so that message is on the screen before the walk starts
+-- and is not replaced by the result without ever having been seen.
 function LineLength:showSample(counts)
     UIManager:show(InfoMessage:new{ text = _("Measuring pages..."), timeout = 1 })
-    local ok, sample, reason = pcall(function() return (self:measureSample(counts)) end)
+    UIManager:tickAfterNext(function()
+        self:showSampleResult(counts)
+    end)
+end
+
+function LineLength:showSampleResult(counts)
+    local ok, sample, reason = pcall(function() return self:measureSample(counts) end)
     if not ok then
         logger.warn("linelength: could not measure a sample of pages:", sample)
         UIManager:show(InfoMessage:new{ text = _("Could not measure the pages of this book.") })
@@ -532,6 +673,63 @@ function LineLength:onLinelengthPage()
     return true
 end
 
+-- The settings of the auto-tune, as a menu: a switch, and the numbers that decide what it does.
+-- Each number is a step of 1, and the menu shows what it is set to now.
+function LineLength:settingsMenu()
+    local settings = Settings:read()
+    local function save()
+        Settings:write(settings)
+    end
+    local function number(label, key, step, min, max)
+        return {
+            text_func = function()
+                return T(_("%1: %2"), label, tostring(settings[key]))
+            end,
+            keep_menu_open = true,
+            sub_item_table = {
+                {
+                    text = T(_("Less %1"), label),
+                    enabled_func = function() return settings[key] > min end,
+                    callback = function()
+                        settings[key] = math.max(min, settings[key] - step)
+                        save()
+                    end,
+                },
+                {
+                    text = T(_("More %1"), label),
+                    enabled_func = function() return settings[key] < max end,
+                    callback = function()
+                        settings[key] = math.min(max, settings[key] + step)
+                        save()
+                    end,
+                },
+            },
+        }
+    end
+    return {
+        {
+            text_func = function()
+                return settings.enabled and _("Auto-tune when a book opens: on") or _("Auto-tune when a book opens: off")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                settings.enabled = not settings.enabled
+                save()
+            end,
+        },
+        number(_("Shortest line"), "band_min", 1, 30, 80),
+        number(_("Longest line"), "band_max", 1, 30, 80),
+        number(_("Target line length"), "target", 1, 30, 100),
+        number(_("Smallest margin"), "margin_min", 1, 0, 140),
+        number(_("Biggest margin"), "margin_max", 1, 0, 140),
+        number(_("Characters per step"), "max_chars_per_step", 1, 1, 30),
+        number(_("Pages at the start"), "sample_first", 1, 0, 20),
+        number(_("Pages in the middle"), "sample_middle", 1, 1, 20),
+        number(_("Pages at the end"), "sample_last", 1, 0, 20),
+        number(_("Steps at most"), "max_steps", 1, 1, 20),
+    }
+end
+
 function LineLength:addToMainMenu(menu_items)
     menu_items.linelength_page = {
         text = _("Line length: this page"),
@@ -542,6 +740,13 @@ function LineLength:addToMainMenu(menu_items)
         text = _("Line length: this book (sample)"),
         sorting_hint = "typeset",
         callback = function() self:showSample() end,
+    }
+    menu_items.linelength_settings = {
+        text = _("Line length: settings"),
+        sorting_hint = "typeset",
+        sub_item_table_func = function()
+            return self:settingsMenu()
+        end,
     }
 end
 

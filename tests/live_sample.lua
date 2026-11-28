@@ -115,11 +115,24 @@ check("the reader is back on its page again", doc:getCurrentPage() == start_page
 print("--- what the reader is shown ---")
 shown = {}
 refreshes = 0
+-- showSample shows the "measuring" message and waits for the next UI tick before the walk, so the
+-- measurement has to be triggered the way the UI loop would do it.
+-- UIManager:tickAfterNext wraps the action before queueing it, so the wrapper is what comes back.
+local pending = UIManager.tickAfterNext
+UIManager.tickAfterNext = function(_self, action, ...)
+    pending(_self, action, ...)
+    action(...)
+    return function() end
+end
 plugin:showSample()
+-- the first widget is the "measuring" message, the last one is the result
 local message = shown[#shown]
+for _i, widget in ipairs(shown) do
+    if type(widget.text) == "string" and widget.text:find("Median line") then message = widget end
+end
 check("the message is shown", message ~= nil, tostring(#shown) .. " widgets")
 -- Showing a message paints it: what must not refresh is the page walk inside the sample.
-check("one widget for the wait, one for the result", #shown == 2, tostring(#shown) .. " widgets")
+check("the measuring message, then the result", #shown == 2, tostring(#shown) .. " widgets")
 if message and message.text then
     print(message.text)
 end
