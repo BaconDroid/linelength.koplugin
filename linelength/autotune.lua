@@ -78,6 +78,9 @@ function AutoTune.limits(settings)
         margin_min = within(settings.margin_min, nil, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING),
         margin_max = within(settings.margin_max, nil, AutoTune.MARGIN_FLOOR, AutoTune.MARGIN_CEILING),
     })
+    if limits.band_min > limits.band_max then
+        limits.band_min, limits.band_max = limits.band_max, limits.band_min
+    end
     if limits.margin_min > limits.margin_max then
         limits.margin_min, limits.margin_max = limits.margin_max, limits.margin_min
     end

@@ -69,7 +69,8 @@ Four more entries in the Typeset menu:
   opening anything.
 - **Line length: tuning settings** holds the band of line lengths and the bounds of the margins.
 
-The sample and the tune are also actions, so they can be put on a gesture.
+The sample and the tune are also actions, so they can be put on a gesture. Automatic tuning is off
+until the reader turns it on, with the switch above.
 
 | Setting                     | What it means                                     | Default |
 |:----------------------------|:--------------------------------------------------|--------:|
@@ -92,7 +93,9 @@ The margins are saved with the book, the way KOReader saves the margins a reader
 the book is tuned every time it is opened at its first page. The automatic tune is the *Line length:
 tune this book* action, run at the moment the book opens: it measures the pages, moves the margins if
 the lines are outside the band, and says what it did, the way it does when the reader asks for it. A
-book that is already within the band keeps the margins it has, and says so.
+book that is already within the band, with both margins inside the bounds the reader set, keeps the
+margins it has, and says so. A margin outside those bounds is brought back inside them first, even
+when the lines already read well.
 
 ## What the ranges are
 
