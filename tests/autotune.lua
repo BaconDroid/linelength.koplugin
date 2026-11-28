@@ -111,7 +111,8 @@ G_reader_settings:delSetting("linelength_margin_min")
 G_reader_settings:delSetting("linelength_margin_max")
 G_reader_settings:saveSetting("linelength_auto_tune", true)
 G_reader_settings:flush()
-local limits = AutoTune.limits(plugin:settings())
+local settings = plugin:settings()
+local limits = AutoTune.limits(settings)
 
 -- The book starts badly set up: a big text on wide margins makes the lines too short.
 layout.font_size = tonumber(os.getenv("FONT")) or 22
