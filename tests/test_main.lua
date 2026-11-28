@@ -393,11 +393,11 @@ expect("sample menu item text", items.linelength_sample and items.linelength_sam
 expect("sample menu item goes in the Typeset menu", items.linelength_sample and items.linelength_sample.sorting_hint, "typeset")
 local item_count = 0
 for _k in pairs(items) do item_count = item_count + 1 end
-expect("four menu items", item_count, 4)
+expect("five menu items", item_count, 5)
 expect("the tune menu item", items.linelength_tune and items.linelength_tune.text, "Line length: tune this book")
 expect("the tune action is registered", type(actions["linelength_tune"]), "table")
 expect("the tune action event", actions["linelength_tune"] and actions["linelength_tune"].event, "LinelengthTune")
-expect("the settings menu item", items.linelength_settings and items.linelength_settings.text, "Line length: settings")
+expect("the settings menu item", items.linelength_settings and items.linelength_settings.text, "Line length: tuning settings")
 expect("the settings menu item goes in the Typeset menu", items.linelength_settings and items.linelength_settings.sorting_hint, "typeset")
 expect("the settings menu has a sub menu", type(items.linelength_settings and items.linelength_settings.sub_item_table_func), "function")
 expect("sample action registered", type(actions["linelength_sample"]), "table")
@@ -1240,16 +1240,15 @@ local function tests_autotune()
     -- two differ here, since the margins moved from 30 to 50.
     expect("the count is the one of the last layout", result.chars, 120 - applied[#applied][1])
 
-    -- The band is the auto-tune's own, so a bag of settings cannot move it: a book that measures 58
-    -- is inside it even when the rest of the settings say otherwise.
+    -- The band is now the reader's, so a book that measures 58 is out of a 65-70 band and the loop
+    -- moves the margins: the settings do decide what the tune stops on.
     result, applied = tuneBook({
         margins = { 40, 40 },
-        settings = { band_min = 65, band_max = 70, target = 68 },
+        settings = { band_min = 65, band_max = 70 },
         measure = function() return 58 end,
     })
-    expect("the band is the auto-tune's own", #applied, 0)
-    expect("and its count is reported", result and result.chars, 58)
-    expect("nothing is reported as changed", result and result.changed, false)
+    expect("a book below the band the reader set is tuned", #applied > 0, true)
+    expect("and it is reported as changed", result and result.changed, true)
 
     -- The same book with the default band is out of it, so the margins move.
     result, applied = tuneBook({
@@ -1502,6 +1501,21 @@ local function tests_sample()
     expect("the automatic tune reads the margins from the reader", tuned_with and tuned_with.margin_min, 20)
     expect("the automatic tune reads the margins from the reader", tuned_with and tuned_with.margin_max, 26)
 
+    -- The automatic tune is the manual one: it says what it did, so the reader who opens a book knows
+    -- the margins moved. The message comes from tuneNow, which the automatic path now calls.
+    local said = {}
+    auto_plugin.autoTune = function() return { steps = 1, chars = 58, changed = true, margin = 22 } end
+    auto_plugin.tuneNow = function()
+        said[#said + 1] = "tuneNow"
+        return LineLength.tuneNow(auto_plugin)
+    end
+    shown = {}
+    G_reader_settings.data = { linelength_auto_tune = true }
+    auto_plugin:onReaderReady()
+    expect("the automatic tune goes through the manual action", #said, 1)
+    expect("and the reader is told what happened", shown[#shown] and shown[#shown].text,
+        "Tuned to 58 characters.")
+
     -- It runs when the book is opened at its start, and nowhere else: a book picked up where it was
     -- left keeps the layout the reader is reading it with.
     local gate_doc = fakeDoc({ L1, L2, L3 })
@@ -1539,7 +1553,7 @@ local function tests_sample()
 
     -- The settings menu: a switch and the numbers, each with a step of one.
     local menu = auto_plugin:settingsMenu()
-    expect("the settings menu has exactly three entries", #menu, 3)
+    expect("the settings menu has exactly four entries", #menu, 4)
     local found_switch, found_numbers = false, 0
     for _i, item in ipairs(menu) do
         if item.text_func then
@@ -1552,14 +1566,16 @@ local function tests_sample()
             found_numbers = found_numbers + 1
         end
     end
-    expect("the settings menu has the switch", found_switch, true)
-    expect("the settings menu has the numbers", found_numbers, 2)
+    expect("the settings menu has no switch", found_switch, false)
+    expect("the settings menu has the numbers", found_numbers, 4)
 
-    -- The switch flips the setting and keeps it.
+    -- The switch is its own Typeset entry now: it flips the setting and keeps it.
+    local switch = items.linelength_auto_tune
+    expect("the switch has a menu entry", type(switch), "table")
     local before = settings_plugin:settings().enabled
-    menu[1].callback()
+    switch.callback()
     expect("the switch flips the setting", settings_plugin:settings().enabled, not before)
-    menu[1].callback()
+    switch.callback()
     expect("and flips it back", settings_plugin:settings().enabled, before)
 
     -- A number goes up and down by one.

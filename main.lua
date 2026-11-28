@@ -338,7 +338,7 @@ function LineLength:onReaderReady()
     end
     -- ReaderRolling schedules its partial rerendering a tick after it is ready, not before. Measuring
     -- here would make every margin change a full re-render on the UI thread at book open, so the tune
-    -- waits for the reader's own tick; no message is shown, the automatic path is meant to be quiet.
+    -- waits for the reader's own tick.
     UIManager:tickAfterNext(function()
         -- Only when the book is opened at its start: a book picked up where it was left keeps its
         -- layout. The page is asked for here rather than before the tick, so that it holds where the
@@ -348,19 +348,9 @@ function LineLength:onReaderReady()
         if (ok_page and tonumber(page)) ~= 1 then
             return
         end
-        local ok_tune, result = pcall(function() return (self:autoTune(settings)) end)
-        if not ok_tune then
-            logger.warn("linelength: the auto-tune failed:", result)
-            return
-        end
-        -- A book that could not be measured has no count: the tune gives up on it and the book keeps
-        -- the layout it has.
-        if not result or result.chars == nil then
-            return
-        end
-        if result.changed then
-            logger.info("linelength: auto-tuned to", result.chars, "characters in", result.steps, "steps")
-        end
+        -- The automatic tune is the manual one, run for the reader: it says what it did, so a reader
+        -- opening a book knows the margins were moved and why.
+        self:tuneNow()
     end)
 end
 
@@ -507,9 +497,20 @@ end
 function LineLength:settings()
     return {
         enabled = G_reader_settings:isTrue("linelength_auto_tune"),
+        band_min = tonumber(G_reader_settings:readSetting("linelength_band_min")) or AutoTune.BAND_MIN,
+        band_max = tonumber(G_reader_settings:readSetting("linelength_band_max")) or AutoTune.BAND_MAX,
         margin_min = tonumber(G_reader_settings:readSetting("linelength_margin_min")) or AutoTune.MARGIN_MIN,
         margin_max = tonumber(G_reader_settings:readSetting("linelength_margin_max")) or AutoTune.MARGIN_MAX,
     }
+end
+
+function LineLength:saveSettings(settings)
+    G_reader_settings:saveSetting("linelength_auto_tune", settings.enabled)
+    G_reader_settings:saveSetting("linelength_band_min", settings.band_min)
+    G_reader_settings:saveSetting("linelength_band_max", settings.band_max)
+    G_reader_settings:saveSetting("linelength_margin_min", settings.margin_min)
+    G_reader_settings:saveSetting("linelength_margin_max", settings.margin_max)
+    G_reader_settings:flush()
 end
 
 
@@ -518,10 +519,7 @@ end
 function LineLength:settingsMenu()
     local settings = self:settings()
     local function save()
-        G_reader_settings:saveSetting("linelength_auto_tune", settings.enabled)
-        G_reader_settings:saveSetting("linelength_margin_min", settings.margin_min)
-        G_reader_settings:saveSetting("linelength_margin_max", settings.margin_max)
-        G_reader_settings:flush()
+        self:saveSettings(settings)
     end
     -- A number, with a step of one. The bounds a number is given here are its own. A number that is
     -- one end of a pair also gets the other end of the pair as a bound, so that the two can never
@@ -564,16 +562,8 @@ function LineLength:settingsMenu()
         }
     end
     return {
-        {
-            text_func = function()
-                return settings.enabled and _("Auto-tune when a book opens: on") or _("Auto-tune when a book opens: off")
-            end,
-            keep_menu_open = true,
-            callback = function()
-                settings.enabled = not settings.enabled
-                save()
-            end,
-        },
+        number(_("Shortest line"), "band_min", 1, 30, 80, "band_max", true),
+        number(_("Longest line"), "band_max", 1, 30, 80, "band_min", false),
         number(_("Smallest margin"), "margin_min", 1, 0, 140, "margin_max", true),
         number(_("Biggest margin"), "margin_max", 1, 0, 140, "margin_min", false),
     }
@@ -595,8 +585,21 @@ function LineLength:addToMainMenu(menu_items)
         sorting_hint = "typeset",
         callback = function() self:tuneNow() end,
     }
+    menu_items.linelength_auto_tune = {
+        text_func = function()
+            local settings = self:settings()
+            return settings.enabled and _("Line length: auto-tune on a book's first page: on")
+                or _("Line length: auto-tune on a book's first page: off")
+        end,
+        sorting_hint = "typeset",
+        callback = function()
+            local settings = self:settings()
+            settings.enabled = not settings.enabled
+            self:saveSettings(settings)
+        end,
+    }
     menu_items.linelength_settings = {
-        text = _("Line length: settings"),
+        text = _("Line length: tuning settings"),
         sorting_hint = "typeset",
         sub_item_table_func = function()
             return self:settingsMenu()
