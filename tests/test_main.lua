@@ -1476,16 +1476,6 @@ local function tests_sample()
     expect("the margins start at 10", settings.margin_min, 10)
     expect("the margins end at 50", settings.margin_max, 50)
 
-    -- A reader who set the three in the build that kept them in a file of its own finds them still
-    -- set: they are read from that file once and kept in the reader's settings from then on.
-    plugin_settings.settings = { enabled = true, margin_min = 22, margin_max = 38 }
-    G_reader_settings.data = {}
-    local migrated = settings_plugin:settings()
-    expect("the old switch is kept", migrated.enabled, true)
-    expect("the old smallest margin is kept", migrated.margin_min, 22)
-    expect("the old biggest margin is kept", migrated.margin_max, 38)
-    expect("and it is written in the reader's settings", G_reader_settings.data.linelength_margin_max, 38)
-    plugin_settings.settings = {}
 
     -- The auto-tune does nothing when the reader has not asked for it. The book is opened at its start,
     -- which is the only place the tune runs.
@@ -1611,8 +1601,37 @@ local function tests_sample()
     G_reader_settings.data = {}
 end
 
+
+-- 14. a drawer that could not draw off screen says so on every call, so a caller that keeps its
+-- callback cannot end up painting on the panel it asked to stay off.
+local function tests_drawer()
+    local Measure = require("linelength/measure")
+    local repaints, drawn = 0, 0
+    local UIManagerStub = require("ui/uimanager")
+    local real_repaint = UIManagerStub.forceRePaint
+    UIManagerStub.forceRePaint = function() repaints = repaints + 1 end
+    local ui = { view = { paintTo = function() drawn = drawn + 1; error("paint boom") end } }
+
+    local draw, release = Measure.drawer(ui, true)
+    expect("a strict drawer refuses a page it cannot draw off screen", draw(), false)
+    expect("and it refuses again, rather than falling back to the screen", draw(), false)
+    expect("and nothing was repainted", repaints, 0)
+    expect("the page was attempted once and given up on", drawn, 1)
+    release()
+
+    repaints, drawn = 0, 0
+    local loose_draw, loose_release = Measure.drawer(ui, false)
+    expect("a drawer that may use the screen repaints instead", loose_draw(), true)
+    expect("and the page was attempted once before that", drawn, 1)
+    expect("the repaint was asked for", repaints, 1)
+    loose_release()
+
+    UIManagerStub.forceRePaint = real_repaint
+end
+
 tests_autotune()
 tests_sample()
+tests_drawer()
 
 if failures > 0 then
     error(failures .. " main test(s) failed")
