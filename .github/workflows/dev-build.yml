@@ -1,0 +1,108 @@
+name: Dev build
+
+# Builds linelength.koplugin.zip from a pull request or on request into a rolling "dev"
+# prerelease, so a branch can be tried on the device before it is offered upstream.
+# It lives on the fork's main branch only and is never part of a branch sent upstream.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build (empty builds the dispatched ref)
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # A pull request checks out a merge commit by default; the zip should be the
+          # pushed commit, which is also the one the release body names.
+          ref: ${{ github.event.inputs.ref || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the unit tests
+        run: |
+          python -m pip install --quiet lupa
+          python tests/run.py
+
+      - name: Read the version and the commit
+        id: info
+        run: |
+          version=$(grep -oP 'version\s*=\s*"\K[^"]+' _meta.lua)
+          short=$(git rev-parse --short HEAD)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+
+      # Only what runs on the device goes in the zip, under a top-level plugin folder.
+      - name: Build plugin zip
+        run: |
+          stage="$RUNNER_TEMP/stage"
+          mkdir -p "$stage/linelength.koplugin"
+          cp -r _meta.lua main.lua LICENSE linelength "$stage/linelength.koplugin/"
+
+          # The version in KOReader's plugin list names the commit, so the build on the
+          # device can be matched to the push it came from.
+          sed -i "s|\"${{ steps.info.outputs.version }}\"|\"${{ steps.info.outputs.version }}-dev.${{ steps.info.outputs.short }}\"|" \
+            "$stage/linelength.koplugin/_meta.lua"
+          grep -n 'version' "$stage/linelength.koplugin/_meta.lua"
+
+          cd "$stage"
+          zip -r "$GITHUB_WORKSPACE/linelength.koplugin.zip" linelength.koplugin \
+            -x "*.git*" -x "*/.DS_Store"
+          unzip -l "$GITHUB_WORKSPACE/linelength.koplugin.zip"
+
+      - name: Upload the zip as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linelength.koplugin-dev-${{ steps.info.outputs.short }}
+          path: linelength.koplugin.zip
+
+      # A release asset downloads without a GitHub login, unlike an artifact, which
+      # matters when the zip is fetched on the machine that copies it to the device.
+      # A pull request from a fork gets no token that can write releases.
+      - name: Remove the previous dev release
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view dev --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete dev --yes --cleanup-tag --repo "$GITHUB_REPOSITORY"
+          fi
+
+      - name: Publish the dev release
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          target_commitish: ${{ github.event.inputs.ref || github.event.pull_request.head.sha || github.sha }}
+          name: Dev build
+          prerelease: true
+          make_latest: false
+          files: linelength.koplugin.zip
+          body: |
+            Development build of `linelength.koplugin.zip`, version
+            `${{ steps.info.outputs.version }}-dev.${{ steps.info.outputs.short }}`, from commit
+            ${{ github.event.inputs.ref || github.event.pull_request.head.sha || github.sha }}
+            ([run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})).
+
+            Download `linelength.koplugin.zip`, extract it, copy the `linelength.koplugin` folder
+            into KOReader's plugins folder (`.adds/koreader/plugins/` on a Kobo) and restart KOReader.
+
+            This asset is replaced on every build. Stable releases are under
+            [Releases](../../releases).
